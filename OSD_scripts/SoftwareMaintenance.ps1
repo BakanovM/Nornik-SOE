@@ -1,7 +1,9 @@
 ﻿# Скрипт выполняет обслуживание корпоративного программного обеспечения и его конфигуририрование при работе спец. заливки для удаленки за пределами КСПД.
-# Запускается триггерами назначеннного задания SoftwareMaintenance как PowerShell.exe -Exec Bypass -NoProfile -File %Tools%\SoftwareMaintenance.ps1
-# На данный момент реализовано автоматическое обновление через интернет клиента VMware Horizon
-# Автор - Максим Баканов 2021-11
+# На данный момент реализовано автоматическое обновление через интернет клиента VMware Horizon.
+# Автор - Максим Баканов 2021-11-12
+
+# ToDo:
+# Перенести лог из пользовательской временной папки $Env:Temp\VMware_Horizon_Client_2021MMDDhhmmss.log
 
 # Название приложения, по которому будет производится поиск в реестре
 $App_Name = "VMware Horizon Client";  
@@ -49,7 +51,7 @@ if (-Not($Test_Net1.TcpTestSucceeded)) {
     "Failed Test for Direct Internet connection to ya.ru:443 !" | Out-File $logFile -Append
     Finish-Script; Return
 }
-"There is Direct Internet connection." | Out-File $logFile -Append
+"Direct Internet connection is Working." | Out-File $logFile -Append
 
 
 ####### Авто-обновление клиента VMware Horizon - начало #######
@@ -64,17 +66,18 @@ if ($Process) {
 } else {
 "There is NO running Application '$App_Name' in user session." | Out-File $logFile -Append
 
+try { # для обработки ошибок интернет запросов
+
 # Интернет-Адрес JSON странички как хорошее начало поиска закачки актуальной версии приложения без привязки к его версии.
 $URI = "customerconnect.vmware.com/channel/public/api/v1.0/products/getRelatedDLGList?locale=en_US&category=desktop_end_user_computing&product=vmware_horizon_clients&version=horizon_8&dlgType=PRODUCT_BINARY"
 
-$WebPage_getRelatedDLGList_JSON = (Invoke-WebRequest -Uri $URI ).Content | ConvertFrom-JSON
+$WebPage_getRelatedDLGList_JSON = (Invoke-WebRequest -Uri $URI -UseBasicParsing).Content | ConvertFrom-JSON
 $Soft = ($WebPage_getRelatedDLGList_JSON.dlgEditionsLists | where name -Match "for Windows").dlgList
 # Можно обойтись единственным запросом интернет-страничики и анализировать параметр $Soft.releaseDate.Remove(10)
 
-try { # для обработки ошибок интернет запросов
 # реально в браузере проходим еще одну страничку - "customerconnect.vmware.com/en/downloads/details?downloadGroup=$($Soft.code)&productId=$($Soft.productId)&rPId=$($Soft.releasePackageId)"
 $URI = "customerconnect.vmware.com/channel/public/api/v1.0/dlg/details?locale=en_US&downloadGroup=$($Soft.code)&productId=$($Soft.productId)&rPId=$($Soft.releasePackageId)"
-$Soft2 = ((Invoke-WebRequest -Uri $URI ).Content | ConvertFrom-JSON).downloadFiles
+$Soft2 = ((Invoke-WebRequest -Uri $URI -UseBasicParsing).Content | ConvertFrom-JSON).downloadFiles
 
 # Для поиска установленного приложения - работаем с обоими ветками реестра Uninstall для 32-бит и 64-бит вариантов. Выибираем софт по названию DisplayName и без признака SystemComponent=1
 $Reg_path = "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall";  $Reg_path_to_Unistall = @($Reg_path -replace "WOW6432Node\\"); if (Test-Path $Reg_path) { $Reg_path_to_Unistall += $Reg_path }
@@ -155,7 +158,7 @@ $Script_Path = $MyInvocation.MyCommand.Definition;
 $Script_Name = Split-Path $Script_Path -Leaf; $Script_Dir = Split-Path $Script_Path -Parent # if ($Script_Path -match ".+\\(.+\.ps1)") { $Script_Name = $Matches[1] };  
 if ($Script_Name -match "(^.+)\..+") { $Reg_param = "ETag_" + $Matches[1] }
 $URI = "https://github.com/BakanovM/Nornik-SOE/raw/main/OSD_scripts/$Script_Name"
-try { $Web = IWR -Uri $URI -Method Head } # Запрашиваем инфу о скрипте в инете - для того чтобы узнать обновился ли он
+try { IWR -Uri $URI -Method Head -UseBasicParsing } # Запрашиваем инфу о скрипте в инете - для того чтобы узнать обновился ли он
 catch { "Error request info for updated script! $($_.Exception.Message)" | Out-File $logFile -Append; Finish-Script; Return }
 $Web_ETag = $Web.Headers.ETag.Trim('"')
 
