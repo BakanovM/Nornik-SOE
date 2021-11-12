@@ -3,6 +3,8 @@
 # Автор - Максим Баканов 2021-11-12
 
 # ToDo:
+# На время обновления приложения заблокировать юзеру его запуск
+# Пользователя оповестить о начале и окончании обновления приложения
 # Перенести лог из пользовательской временной папки $Env:Temp\VMware_Horizon_Client_2021MMDDhhmmss.log
 
 # Название приложения, по которому будет производится поиск в реестре
@@ -15,9 +17,16 @@ $App_Vendor = "VMware"
 $App_setup_params = "/silent /norestart VDM_SERVER=HV.nornik.ru LOGINASCURRENTUSER_DEFAULT=1 INSTALL_SFB=1 INSTALL_HTML5MMR=1"
 
 
-# Лог файл
-$logFile = "$($myInvocation.MyCommand -replace "\.ps1$").log"; if (!$logFile) { $logFile = "SoftwareMaintenance.log" }; $logFile = "$($Env:WinDir)\Temp\$logFile"
+# Задаем Лог-файл действий моего скрипта и путь-имя данного скрипта для случаев как штатного исполнения внутри скрипта, так и для случая интерактивной отладки
+$Script_Path = $myInvocation.InvocationName # При исполнении внутри скрипта - тут будет полный путь к PS1 файлу скрипта. При интерактивной работе в PoSh-консоли или в ISE среде тут будет пустая строка
+# $MyInvocation.MyCommand.Definition; # При исполнении скрипта - тут будет полный путь к PS1 файлу скрипта. При работе в ISE среде тут строка "$MyInvocation.MyCommand.Definition"
+if (!$Script_Path) # При исполнении в режиме отладки нужно правильно задать переменные лог-файла и пути-имени скрипта
+    { $Script_Path = "C:\Setup\Tools\SoftwareMaintenance.ps1" }
+$Script_Name = Split-Path $Script_Path -Leaf; $Script_Dir = Split-Path $Script_Path -Parent # if ($Script_Path -match ".+\\(.+\.ps1)") { $Script_Name = $Matches[1] };  
+if ($Script_Name -match "(^.+)\..+") { $Script_Name_no_ext = $Matches[1] }
+$logFile = "$($Env:WinDir)\Temp\$Script_Name_no_ext.log"
 # Start-Transcript $logFile -Append
+
 
 # Задаем ширину окна консоли, чтобы вывод в лог-файл не обрезался по ширине 80 символов.  http://stackoverflow.com/questions/978777/powershell-output-column-width
 $rawUI = $Host.UI.RawUI;  $oldSize = $rawUI.BufferSize;  $typeName = $oldSize.GetType().FullName; $newSize = New-Object $typeName (256, 8192);
@@ -92,13 +101,14 @@ if (($Reg_Uninst_Item | measure).Count -ge 2) { # внутренняя недо�
 if (!$Reg_Uninst_Item) { # Если наш софт вообще НЕ был установлен
     $Soft_Install_required = $true
 } else { # Если наш софт установлен
+    $RIP = Get-ItemProperty $Reg_Uninst_Item.PSPath;  # Извлекаем Самую инересную инфу об уже установленном ПО.
     if ($RIP.BundleCachePath -match ".+\\(.+\.exe)") { $Soft_orig_installer = $Matches[1] } # имя EXE-инсталлятора установленного приложения
+
     if ($Soft_orig_installer -eq $Soft2.fileName) { # Если установленное приложение является актуальным
         "Installed application '$($RIP.DisplayName)' has actual version $($RIP.DisplayVersion)" | Out-File $logFile -Append
         $Soft_Install_required = $false
     } else { # Если версия установленного приложения отличается от актуальной
         "Already installed old Application:" | Out-File $logFile -Append
-        $RIP = Get-ItemProperty $Reg_Uninst_Item.PSPath;  # Извлекаем Самую инересную инфу об уже установленном ПО.
         ($RIP | select @("DisplayName", "DisplayVersion", "QuietUninstallString", "BundleProviderKey", "BundleCachePath") | FL | Out-String).Trim() | Out-File $logFile -Append -Width 500
         # $Soft_DispName = $RIP.DisplayName;  $Soft_Ver = $RIP.DisplayVersion; $Soft_UnInst_Str = $RIP.QuietUninstallString; $Soft_BundleCachePath = $RIP.BundleCachePath; $Soft_BundleProviderKey = $RIP.BundleProviderKey
         
@@ -151,14 +161,12 @@ $Process = Start-Process -FilePath $Soft2.fileName -ArgumentList $App_setup_para
 $Msg = @() # Различные признаки необходимости перезапуска системы описаны тут: https://adamtheautomator.com/pending-reboot-registry/
 if (Test-Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending") { $Msg += "RebootPending" }
 if (Test-Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Component Based Servicing\PackagesPending") { $Msg += "PackagesPending" }
+# HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager
 if ($Msg) { "Detected Component Based Servicing pending operations - " + [string]$Msg | Out-File $logFile -Append }
 
-
-$Script_Path = $MyInvocation.MyCommand.Definition; 
-$Script_Name = Split-Path $Script_Path -Leaf; $Script_Dir = Split-Path $Script_Path -Parent # if ($Script_Path -match ".+\\(.+\.ps1)") { $Script_Name = $Matches[1] };  
-if ($Script_Name -match "(^.+)\..+") { $Reg_param = "ETag_" + $Matches[1] }
+$Reg_param = "ETag_" + $Script_Name_no_ext # if ($Script_Name -match "(^.+)\..+") { $Reg_param = "ETag_" + $Matches[1] }
 $URI = "https://github.com/BakanovM/Nornik-SOE/raw/main/OSD_scripts/$Script_Name"
-try { IWR -Uri $URI -Method Head -UseBasicParsing } # Запрашиваем инфу о скрипте в инете - для того чтобы узнать обновился ли он
+try { $Web = IWR -Uri $URI -Method Head -UseBasicParsing } # Запрашиваем инфу о скрипте в инете - для того чтобы узнать обновился ли он
 catch { "Error request info for updated script! $($_.Exception.Message)" | Out-File $logFile -Append; Finish-Script; Return }
 $Web_ETag = $Web.Headers.ETag.Trim('"')
 
@@ -167,7 +175,7 @@ $Reg_value = (Get-ItemProperty "HKLM:\SOFTWARE\Company" -Name $Reg_param -EA 0).
 if ($Web_ETag -ne $Reg_value) { # обнаружена новая версия скрипта в интернете
     "Found NEW version of script in Internet with ETag = $Web_ETag" | Out-File $logFile -Append
     Set-Location (Split-Path $Script_Path -Parent)
-    try { $Web = IWR -Uri $URI -OutFile "$Script_Path.new" } # Загружаем обновленную версию скрипта скрипта из инетернет
+    try { IWR -Uri $URI -OutFile "$Script_Path.new" } # Загружаем обновленную версию скрипта скрипта из инетернет
     catch { "Error downloading updated script! $($_.Exception.Message)" | Out-File $logFile -Append; Finish-Script; Return }
 
     Set-ItemProperty "HKLM:\SOFTWARE\Company" -Name $Reg_param -Value $Web_ETag -EA 0
