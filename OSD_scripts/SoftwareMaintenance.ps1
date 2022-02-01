@@ -1,13 +1,10 @@
-﻿# Скрипт выполняет обслуживание корпоративного программного обеспечения и его конфигуририрование при работе спец. заливки для удаленки за пределами КСПД.
-# На данный момент реализовано автоматическое обновление через интернет клиента VMware Horizon.
-# Автор - Максим Баканов 2021-11-12
+﻿<# 
+Скрипт выполняет обслуживание корпоративного программного обеспечения и его конфигуририрование при работе специальной заливки для удаленки за пределами КСПД.
+На данный момент реализовано автоматическое обновление через интернет клиента VMware Horizon и установка DameWare MRC с нашего сервера.
+Автор - Максим Баканов 2022-02-01
+#>
 
-# ToDo:
-# На время обновления приложения заблокировать юзеру его запуск
-# Пользователя оповестить о начале и окончании обновления приложения
-# Перенести лог из пользовательской временной папки $Env:Temp\VMware_Horizon_Client_2021MMDDhhmmss.log
-
-# Название приложения, по которому будет производится поиск в реестре
+# Название приложения, по которому будет производится поиск в реестре и по которому будут распознаваться запущенные процессы приложения.
 $App_Name = "VMware Horizon Client";  
 
 # Название компании-разработчика, по которому будут отбираться запущенные процессы
@@ -18,29 +15,29 @@ $App_setup_params = "/silent /norestart VDM_SERVER=HV.nornik.ru LOGINASCURRENTUS
 
 
 # Задаем Лог-файл действий моего скрипта и путь-имя данного скрипта для случаев как штатного исполнения внутри скрипта, так и для случая интерактивной отладки
-$Script_Path = $myInvocation.InvocationName # При исполнении внутри скрипта - тут будет полный путь к PS1 файлу скрипта. При интерактивной работе в PoSh-консоли или в ISE среде тут будет пустая строка
+$Script_Path = $MyInvocation.MyCommand.Definition # При исполнении внутри скрипта - тут будет полный путь к PS1 файлу скрипта. При интерактивной работе в PoSh-консоли или в ISE среде тут будет пустая строка
 # $MyInvocation.MyCommand.Definition; # При исполнении скрипта - тут будет полный путь к PS1 файлу скрипта. При работе в ISE среде тут строка "$MyInvocation.MyCommand.Definition"
 if (!$Script_Path) # При исполнении в режиме отладки нужно правильно задать переменные лог-файла и пути-имени скрипта
-    { $Script_Path = "C:\Setup\Tools\SoftwareMaintenance.ps1" }
+    { $Script_Path = "$Env:WinDir\SoftwareDistribution\Download\SoftwareMaintenance.ps1" }
 $Script_Name = Split-Path $Script_Path -Leaf; $Script_Dir = Split-Path $Script_Path -Parent # if ($Script_Path -match ".+\\(.+\.ps1)") { $Script_Name = $Matches[1] };  
 if ($Script_Name -match "(^.+)\..+") { $Script_Name_no_ext = $Matches[1] }
 $logFile = "$($Env:WinDir)\Temp\$Script_Name_no_ext.log"
 # Start-Transcript $logFile -Append
 
+function Finish-Script {
+# Stop-Transcript
+"$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - The End of PoSh script." | Out-File $logFile -Append
+}
+Push-Location
 
 # Задаем ширину окна консоли, чтобы вывод в лог-файл не обрезался по ширине 80 символов.  http://stackoverflow.com/questions/978777/powershell-output-column-width
 $rawUI = $Host.UI.RawUI;  $oldSize = $rawUI.BufferSize;  $typeName = $oldSize.GetType().FullName; $newSize = New-Object $typeName (256, 8192);
 if ($rawUI.BufferSize.Width -lt 256) { $rawUI.BufferSize = $newSize }
 
-
 $UserName = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name # https://www.optimizationcore.com/scripting/ways-get-current-logged-user-powershell/
 $HostName = [System.Net.Dns]::GetHostName() # https://virot.eu/getting-the-computername-in-powershell/  https://adamtheautomator.com/powershell-get-computer-name/
-"`n`n$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start of PoSh script for Software Maintenance as $UserName on $HostName with argument '$($Args[0])'." | Out-File $logFile -Append
+"`n`n$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start of Software Maintenance as $UserName on $HostName with argument '$($Args[0])' as PoSh script:`n$Script_Path" | Out-File $logFile -Append
 
-function Finish-Script {
-# Stop-Transcript
-"$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - The End of PoSh script." | Out-File $logFile -Append
-}
 
 ####### Конфигурирование системы и ПО, не требующее доступа в интернет #######
 
@@ -51,7 +48,7 @@ $Sys_UpTime = (Get-Date) - (Get-CimInstance "Win32_OperatingSystem" | Select -Ex
 $Process = Get-Process -IncludeUserName | ? UserName -match "\\Install$" | where ProcessName -ne "conhost" | sort StartTime | select ProcessName,Description,StartTime,FileVersion,Path -Last 1
 if ($Process) {
     "Found process executed as LA Install:`n$([string]$Process)" | Out-File $logFile -Append
-    Finish-Script; Return
+    # Finish-Script; Return
 } 
 
 # Проверяем доступность интернета для загрузки актуальной версии нашего приложения
@@ -63,10 +60,19 @@ if (-Not($Test_Net1.TcpTestSucceeded)) {
 "Direct Internet connection is Working." | Out-File $logFile -Append
 
 
+# Задаем папку, в которой будут складываться инсталляторы приложения.
+if ($env:Tools) { 
+    $App_setup_path = (Split-Path $env:Tools -Parent) 
+} else {
+    $App_setup_path = $env:WinDir + '\Temp\'
+}
+
 ####### Авто-обновление клиента VMware Horizon - начало #######
 
 # Проверяем есть ли запущенные процессы обновляемого приложения, которые могут помешать ходу его обновления.
-$Process = Get-Process * -IncludeUserName | where Company -match $App_Vendor | where UserName -NotMatch "^NT AUTHORITY\\" | select ProcessName,Description,UserName,StartTime,FileVersion,Path
+$Process = Get-Process * -IncludeUserName | ? { $_.Company -match $App_Vendor -and $_.UserName -NotMatch "^NT AUTHORITY\\"  -and ($_.Description -match $App_Name -or $_.Product -match $App_Name)}`
+| select ProcessName,Description,Product,UserName,StartTime,FileVersion,Path
+
 if ($Process) {
     "Found running Application:" | Out-File $logFile -Append
     # https://stackoverflow.com/questions/32252707/remove-blank-lines-in-powershell-output/39554482  https://stackoverflow.com/questions/25106675/why-does-removal-of-empty-lines-from-multiline-string-in-powershell-fail-using-r/25110997
@@ -121,18 +127,11 @@ if (!$Reg_Uninst_Item) { # Если наш софт вообще НЕ был у�
 }
 if ($Soft_Install_required) { # Если принято решение обновлять приложение и все условия для этого есть
 
-"Actual Application available on the internet is:" | Out-File $logFile -Append
+"Actual Application available from Internet is:" | Out-File $logFile -Append
 ($Soft2 | select title, version, build, releaseDate, fileSize, description, thirdPartyDownloadUrl, sha256checksum | FL | Out-String).Trim() | Out-File $logFile -Append -Width 500
 
-# Задаем папку, в которой будут складываться инсталляторы приложения.
-if ($env:Tools) { 
-    $App_setup_path = (Split-Path $env:Tools -Parent) + '\' + ($App_Name -replace " ", "_")
-} else {
-    $App_setup_path = $env:WinDir + '\Temp\' + ($App_Name -replace " ", "_")
-}
-
-New-Item $App_setup_path -ItemType Directory -Force | Out-Null
-Set-Location $App_setup_path
+# Готовим папку для дистрибутива приложения
+$Path = $App_setup_path + '\' + ($App_Name -replace " ", "_"); New-Item $Path -ItemType Directory -Force | Out-Null; Set-Location $Path
 
 # https://stackoverflow.com/questions/28682642/powershell-why-is-using-invoke-webrequest-much-slower-than-a-browser-download
 # In Windows PowerShell, the progress bar was updated pretty much all the time and this had a significant impact on cmdlets (not just the web cmdlets but any that updated progress). 
@@ -141,14 +140,17 @@ $ProgressPreference = 'SilentlyContinue' # решаем проблему с бе
 
 # Скачиваем EXE-инсталлятор софта в текущую папку
 # -OutFile Specifies the output file for which this cmdlet saves the response body. Enter a path and file name. If you omit the path, the default is the current location. The name is treated as a literal path.
-"$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start downloading of actual version from Internet" | Out-File $logFile -Append
+"$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start downloading from Internet the actual version of App '$App_Name' " | Out-File $logFile -Append
 Invoke-WebRequest -Uri $Soft2.thirdPartyDownloadUrl -OutFile $Soft2.fileName
 
 $ProgressPreference = 'Continue'
 
+# На время обновления приложения заблокировать юзеру его запуск
+# "C:\ProgramData\Microsoft\Windows\Start Menu\Programs" 
+
 "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start the Installation of new version of Application." | Out-File $logFile -Append
 $Process = Start-Process -FilePath $Soft2.fileName -ArgumentList $App_setup_params -Wait -PassThru;  $LastExitCode = $Process.ExitCode
-"$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - The installation time for a new version of the program is " + [int]($process.ExitTime - $process.StartTime).TotalSeconds + " seconds with ExitCode $LastExitCode" | Out-File $logFile -Append
+"$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - The installation time for a new version of App '$App_Name' is " + [int]($process.ExitTime - $process.StartTime).TotalSeconds + " seconds with ExitCode $LastExitCode" | Out-File $logFile -Append
 
 }
 } catch [System.Net.WebException] { # обработка ошибок интернет запросов
@@ -158,18 +160,92 @@ $Process = Start-Process -FilePath $Soft2.fileName -ArgumentList $App_setup_para
 }
 } ####### Авто-обновление клиента VMware Horizon - закончено #######
 
+
+####### Установка/обновление DameWare - начало #######
+
+$App_Name = "DameWare Mini Remote Control Service";  # Название приложения, по которому будет производится поиск в реестре
+
+# $App_Vendor = "SolarWinds"  # Название компании-разработчика, по которому будут отбираться запущенные процессы
+
+# инсталлятор ПО в виде MSI+MST со встроенного в DameWare сервер своего веб-сервера, который предоставляет содержимое папки ProgramFiles\DameWare\Binary 
+$URI = "https://dmwr.nornik.ru/dwnl/binary/SolarWinds-Dameware-Agent-x64.MSI"
+if ($URI -match ".+\/(\S+\.MSI)$") { $Inst_MSI = $Matches[1] };  $Inst_MST = $Inst_MSI -replace ".MSI$",".MST";  $URI2 = $URI -replace ".MSI$",".MST"
+
+# Строка аргументов запсука MSIexe инсталлятора приложения. (Исключить параметр /norestart нельзя, т.к. инсталлятор сразу отправит винду в перезагрузку и скрипт даже не успеет записать в лог об успешном завершении инсталляции)
+$App_setup_params = "/i $Inst_MSI TRANSFORMS=$Inst_MST /qn /Log $Env:windir\Temp\DameWare_MRC_install.log"
+
+# Готовим папку для дистрибутива приложения
+$Path = $App_setup_path + '\DameWare_MRC_Agent'; New-Item $Path -ItemType Directory -Force | Out-Null; Set-Location $Path
+
+# Для поиска установленного приложения - работаем только с одной веткой реестра Uninstall, т.к. 64-битная версия ПО правильно выбирает Uninstall раздел реестра. 
+$Reg_path = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall";  
+$Reg_Uninst_Item = Get-ChildItem $Reg_path | ? { (GP $_.PSpath -Name "DisplayName" -EA 0).DisplayName -match $App_Name }
+
+if (-Not $Reg_Uninst_Item) # Наше приложение в системе отсутствует ?
+{   # ДА, Наше приложение еще НЕ установлено
+    "In this system is NOT Installed App '$App_Name'" | Out-File $logFile -Append
+    $App_ver = "0"
+} else { # Наше приложение уже установлено в системе
+    $RIP = Get-ItemProperty $Reg_Uninst_Item.PSPath;  # Извлекаем инфу об уже установленном ПО.
+    $App_ver = $RIP.DisplayVersion
+    "Found already Installed application '$($RIP.Publisher) $($RIP.DisplayName)' $App_ver." | Out-File $logFile -Append
+}
+if ($App_ver -lt "12.02.0.0") { # Если текущая установленная версия ниже целевой либо отсутствует вовсе, то приступаем к загрузке и установке ПО
+
+    # Скачиваем EXE-инсталлятор софта в текущую папку по ссылке со страницы "https://dmwr.nornik.ru/dwnl/advancedDownload.html?dl=UR1M0GZ7"
+    # $URI = "https://dmwr.nornik.ru/dwnl/binary/SolarWinds-Dameware-Agent-x64.exe";  if ($URI -match ".+\/(\S+\.exe)$") { $Inst_Exe = $Matches[1] }
+
+    "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start downloading from Internet the App 'DameWare MRC agent' " | Out-File $logFile -Append
+
+try { # для обработки ошибок интернет запросов
+
+    # Скачиваем в текущую папку инсталлятор ПО в виде двух файлов MSI и MST.
+    $ProgressPreference = 'SilentlyContinue' # решаем проблему с безумно медленной закачкой и сохранением через командлет IWR 
+    Invoke-WebRequest -Uri $URI  -OutFile $Inst_MSI
+    Invoke-WebRequest -Uri $URI2 -OutFile $Inst_MST
+    # -OutFile Specifies the output file for which this cmdlet saves the response body. Enter a path and file name. If you omit the path, the default is the current location. The name is treated as a literal path.
+    $ProgressPreference = 'Continue'
+    
+    # Запускаем инсталляцию ПО как msiexec.exe MSI+MST. В случае успеха установки, когда ExitCode=0 - параметрами реестра донастраивает ПО.
+    "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start the Installation of Application as MSIexec with MSI+MST." | Out-File $logFile -Append
+    $Process = Start-Process "MSIexec.exe" -Arg $App_setup_params -Wait -PassThru -EV Err
+            
+    # https://documentation.solarwinds.com/en/success_center/dameware/content/mrc_client_agent_service_installation_methods.htm
+    # $Process = Start-Process $Inst_Exe -Arg "-ap ""TRANSFORMS=$Inst_MST OVERWRITEREMOTECFG=1""" -Wait -PassThru -EV Err
+
+    # https://support.solarwinds.com/SuccessCenter/s/article/Install-DRS-and-MRC-from-the-command-line?language=en_US
+    # https://www.itninja.com/software/dameware-development/dameware-mini-remote-control-client-agent-service/7-1052
+    # $Process = Start-Process $Inst_Exe -Arg "/args ""/qn TRANSFORMS=$Inst_MST OVERWRITEREMOTECFG=1 reboot=reallysuppress SILENT=yes""" -Wait -PassThru -EV Err
+  
+    if ($Err) { "Installator is NOT executed normally ! `n MSIexec.exe $App_setup_params" | Out-File $logFile -Append }     else {    $ExitCode = $Process.ExitCode    ("$(Get-Date -format "yyyy-MM-dd HH:mm:ss") Duration of Installation for this App: " + [int]($process.ExitTime - $process.StartTime).TotalSeconds + " seconds,  ExitCode: " + $ExitCode) | Out-File $logFile -Append    if ($ExitCode -eq 0) {
+        $RegPath = 'HKLM:\SOFTWARE\DameWare Development\Mini Remote Control Service\Settings'
+        if (-Not (Test-Path $RegPath)) { New-Item -Path $RegPath -Force | Out-Null }
+
+        # Задаем список локальных и доменных групп, члены которых рулят в DameWare (в т.ч. и AD группа полевых инженеров)
+        # Многообразие групп доступа к Remote Control - https://social.technet.microsoft.com/Forums/ru-RU/8e32ab4c-bb03-4aff-a0e9-1c95da58881c/105210851086107510861086107310881072107910801077
+        $Groups_list = @('Administrators', 'Администраторы', 'Пользователи удаленного управления ConfigMgr', 'Пользователи удаленного управления Configuration Manager', 'ConfigMgr Remote Control Users', 'NPR\$Engineers') 
+        0..($Groups_list.Count-1) | % { New-ItemProperty -Path $RegPath -Name "Group $_" -Value $Groups_list[$_] -PropertyType String -Force | Out-Null }
+    }}
+} catch [System.Net.WebException] { # обработка ошибок интернет запросов
+    $Msg = "System.Net.WebException - Exception.Status: {0}, Exception.Response.StatusCode: {1}, {2} `n{3}" -f $_.Exception.Status, $_.Exception.Response.StatusCode, $_.Exception.Message, $_.Exception.Response.ResponseUri.AbsoluteURI
+    "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - $Msg" | Out-File $logFile -Append
+}
+}  ####### Установка/обновление DameWare - закончено #######
+
+
 $Msg = @() # Различные признаки необходимости перезапуска системы описаны тут: https://adamtheautomator.com/pending-reboot-registry/
 if (Test-Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending") { $Msg += "RebootPending" }
 if (Test-Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Component Based Servicing\PackagesPending") { $Msg += "PackagesPending" }
 # HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager
 if ($Msg) { "Detected Component Based Servicing pending operations - " + [string]$Msg | Out-File $logFile -Append }
 
+# Автоматическое обновления скрипта на случай будущих изменений/улучшений в данном скрипте-автоматике.
+Pop-Location
 $Reg_param = "ETag_" + $Script_Name_no_ext # if ($Script_Name -match "(^.+)\..+") { $Reg_param = "ETag_" + $Matches[1] }
 $URI = "https://github.com/BakanovM/Nornik-SOE/raw/main/OSD_scripts/$Script_Name"
 try { $Web = IWR -Uri $URI -Method Head -UseBasicParsing } # Запрашиваем инфу о скрипте в инете - для того чтобы узнать обновился ли он
 catch { "Error request info for updated script! $($_.Exception.Message)" | Out-File $logFile -Append; Finish-Script; Return }
 $Web_ETag = $Web.Headers.ETag.Trim('"')
-
 $Reg_value = (Get-ItemProperty "HKLM:\SOFTWARE\Company" -Name $Reg_param -EA 0).$Reg_param
 
 if ($Web_ETag -ne $Reg_value) { # обнаружена новая версия скрипта в интернете
