@@ -4,6 +4,7 @@
 Автор - Максим Баканов 2022-02-03
 #>
 
+
 # Название приложения, по которому будет производится поиск в реестре и по которому будут распознаваться запущенные процессы приложения.
 $App_Name = "VMware Horizon Client";  
 
@@ -15,7 +16,7 @@ $App_setup_params = "/silent /norestart VDM_SERVER=HV.nornik.ru LOGINASCURRENTUS
 
 
 # Задаем Лог-файл действий моего скрипта и путь-имя данного скрипта для случаев как штатного исполнения внутри скрипта, так и для случая интерактивной отладки
-$Script_Path = $MyInvocation.MyCommand.Definition # При исполнении внутри скрипта - тут будет полный путь к PS1 файлу скрипта. При интерактивной работе в PoSh-консоли или в ISE среде тут будет пустая строка
+$Script_Path = $MyInvocation.MyCommand.Source # При исполнении внутри скрипта - тут будет полный путь к PS1 файлу скрипта. При интерактивной работе в PoSh-консоли или в ISE среде тут будет пустая строка
 # $MyInvocation.MyCommand.Definition; # При исполнении скрипта - тут будет полный путь к PS1 файлу скрипта. При работе в ISE среде тут строка "$MyInvocation.MyCommand.Definition"
 if (!$Script_Path) # При исполнении в режиме отладки нужно правильно задать переменные лог-файла и пути-имени скрипта
     { $Script_Path = "$Env:WinDir\SoftwareDistribution\Download\SoftwareMaintenance.ps1" }
@@ -23,6 +24,14 @@ $Script_Name = Split-Path $Script_Path -Leaf; $Script_Dir = Split-Path $Script_P
 if ($Script_Name -match "(^.+)\..+") { $Script_Name_no_ext = $Matches[1] }
 $logFile = "$($Env:WinDir)\Temp\$Script_Name_no_ext.log"
 # Start-Transcript $logFile -Append
+
+
+# решаем проблему с безумно медленной закачкой и сохранением через командлет IWR Invoke-WebRequest
+# https://stackoverflow.com/questions/28682642/powershell-why-is-using-invoke-webrequest-much-slower-than-a-browser-download
+# In Windows PowerShell, the progress bar was updated pretty much all the time and this had a significant impact on cmdlets (not just the web cmdlets but any that updated progress). 
+# With PSCore6, we have a timer to only update the progress bar every 200ms on a single thread so that the CPU spends more time in the cmdlet and less time updating the screen. 
+$Progr_Pref = $ProgressPreference; $ProgressPreference = 'SilentlyContinue' 
+
 
 function Finish-Script {
 # Stop-Transcript
@@ -62,6 +71,9 @@ if (-Not($Test_Net1.TcpTestSucceeded)) {
 }
 $Msg = "Direct Internet connection is Working."; echo $Msg; $Msg | Out-File $logFile -Append
 
+# По умолчанию PoSh в старой Win10 v1607 использует TLS 1.0, а современные сайты TLS 1.2 и можем получить error request secure channel SSL/TLS при вызове Invoke-WebRequest
+# https://stackoverflow.com/questions/41618766/powershell-invoke-webrequest-fails-with-ssl-tls-secure-channel
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # Задаем папку, в которой будут складываться инсталляторы приложения.
 if ($env:Tools) { 
@@ -130,23 +142,16 @@ if (!$Reg_Uninst_Item) { # Если наш софт вообще НЕ был у�
 }
 if ($Soft_Install_required) { # Если принято решение обновлять приложение и все условия для этого есть
 
-$Msg = "Actual App version available from Internet is $($Soft2.version) $($Soft2.build)"; echo $Msg; $Msg | Out-File $logFile -Append
+$Msg = "Actual App version available from Internet is ver$($Soft2.version) build$($Soft2.build)"; echo $Msg; $Msg | Out-File $logFile -Append
 ($Soft2 | select title, version, build, releaseDate, fileSize, description, thirdPartyDownloadUrl, sha256checksum | FL | Out-String).Trim() | Out-File $logFile -Append -Width 500
 
 # Готовим папку для дистрибутива приложения
 $Path = $App_setup_path + '\' + ($App_Name -replace " ", "_"); New-Item $Path -ItemType Directory -Force | Out-Null; Set-Location $Path
 
-# https://stackoverflow.com/questions/28682642/powershell-why-is-using-invoke-webrequest-much-slower-than-a-browser-download
-# In Windows PowerShell, the progress bar was updated pretty much all the time and this had a significant impact on cmdlets (not just the web cmdlets but any that updated progress). 
-# With PSCore6, we have a timer to only update the progress bar every 200ms on a single thread so that the CPU spends more time in the cmdlet and less time updating the screen. 
-$ProgressPreference = 'SilentlyContinue' # решаем проблему с безумно медленной закачкой и сохранением через командлет IWR 
-
 # Скачиваем EXE-инсталлятор софта в текущую папку
 # -OutFile Specifies the output file for which this cmdlet saves the response body. Enter a path and file name. If you omit the path, the default is the current location. The name is treated as a literal path.
 $Msg = "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start downloading from Internet the actual version of App '$App_Name' "; echo $Msg; $Msg | Out-File $logFile -Append
 Invoke-WebRequest -Uri $Soft2.thirdPartyDownloadUrl -OutFile $Soft2.fileName
-
-$ProgressPreference = 'Continue'
 
 # На время обновления приложения заблокировать юзеру его запуск
 # "C:\ProgramData\Microsoft\Windows\Start Menu\Programs" 
@@ -204,11 +209,9 @@ if ($App_ver -lt "12.02.0.0") { # Если текущая установленн
 try { # для обработки ошибок интернет запросов
 
     # Скачиваем в текущую папку инсталлятор ПО в виде двух файлов MSI и MST.
-    $ProgressPreference = 'SilentlyContinue' # решаем проблему с безумно медленной закачкой и сохранением через командлет IWR 
     Invoke-WebRequest -Uri $URI  -OutFile $Inst_MSI
     Invoke-WebRequest -Uri $URI2 -OutFile $Inst_MST
     # -OutFile Specifies the output file for which this cmdlet saves the response body. Enter a path and file name. If you omit the path, the default is the current location. The name is treated as a literal path.
-    $ProgressPreference = 'Continue'
     
     # Запускаем инсталляцию ПО как msiexec.exe MSI+MST. В случае успеха установки, когда ExitCode=0 - параметрами реестра донастраивает ПО.
     $Msg = "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start the Installation of Application as MSIexec with MSI+MST."; echo $Msg; $Msg | Out-File $logFile -Append
@@ -271,4 +274,6 @@ if ($Web_ETag -ne $Reg_value) { # обнаружена новая версия �
     Start "PowerShell" -Arg "-Exec Bypass -Command `"& { sleep -Sec 5; cd $Script_Dir; ren $Script_Name -N `"$Script_Name.old`"; ren `"$Script_Name.new`" -N $Script_Name; del `"$Script_Name.old`" }`""
 }
 
+$ProgressPreference = $Progr_Pref # восстанавливаем прогресс бар
 Finish-Script; Return
+
