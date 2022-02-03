@@ -1,7 +1,7 @@
 ﻿<# 
 Скрипт выполняет обслуживание корпоративного программного обеспечения и его конфигуририрование при работе специальной заливки для удаленки за пределами КСПД.
 На данный момент реализовано автоматическое обновление через интернет клиента VMware Horizon и установка DameWare MRC с нашего сервера.
-Автор - Максим Баканов 2022-02-01
+Автор - Максим Баканов 2022-02-03
 #>
 
 # Название приложения, по которому будет производится поиск в реестре и по которому будут распознаваться запущенные процессы приложения.
@@ -34,10 +34,13 @@ Push-Location
 $rawUI = $Host.UI.RawUI;  $oldSize = $rawUI.BufferSize;  $typeName = $oldSize.GetType().FullName; $newSize = New-Object $typeName (256, 8192);
 if ($rawUI.BufferSize.Width -lt 256) { $rawUI.BufferSize = $newSize }
 
+# Общая инфа о среде исполнения и о данном скрипте
 $UserName = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name # https://www.optimizationcore.com/scripting/ways-get-current-logged-user-powershell/
 $HostName = [System.Net.Dns]::GetHostName() # https://virot.eu/getting-the-computername-in-powershell/  https://adamtheautomator.com/powershell-get-computer-name/
-"`n`n$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start of Software Maintenance as $UserName on $HostName with argument '$($Args[0])' as PoSh script:`n$Script_Path" | Out-File $logFile -Append
-
+$Msg = "`n`n$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start of Software Maintenance as $UserName on $HostName with argument '$($Args[0])' as PoSh script:`n$Script_Path, "
+$Msg += [string](Get-Item $Script_Path).Length + ' bytes, '
+$S = Select-String -Path $Script_Path -Pattern "Автор .+ (\d{4}-\d\d(-\d\d)?)"; if ($S) { $Msg += $S.Matches[0].Groups[1].Value }
+$Msg | Out-File $logFile -Append
 
 ####### Конфигурирование системы и ПО, не требующее доступа в интернет #######
 
@@ -54,10 +57,10 @@ if ($Process) {
 # Проверяем доступность интернета для загрузки актуальной версии нашего приложения
 $Test_Net1 = Test-NetConnection "ya.ru" -Port 443
 if (-Not($Test_Net1.TcpTestSucceeded)) { 
-    "Failed Test for Direct Internet connection to ya.ru:443 !" | Out-File $logFile -Append
+    $Msg = "Failed Test for Direct Internet connection to ya.ru:443 !"; echo $Msg; $Msg | Out-File $logFile -Append
     Finish-Script; Return
 }
-"Direct Internet connection is Working." | Out-File $logFile -Append
+$Msg = "Direct Internet connection is Working."; echo $Msg; $Msg | Out-File $logFile -Append
 
 
 # Задаем папку, в которой будут складываться инсталляторы приложения.
@@ -74,12 +77,12 @@ $Process = Get-Process * -IncludeUserName | ? { $_.Company -match $App_Vendor -a
 | select ProcessName,Description,Product,UserName,StartTime,FileVersion,Path
 
 if ($Process) {
-    "Found running Application:" | Out-File $logFile -Append
+    $Msg = "Found running processes of App '$App_Name'"; echo $Msg; $Msg | Out-File $logFile -Append
     # https://stackoverflow.com/questions/32252707/remove-blank-lines-in-powershell-output/39554482  https://stackoverflow.com/questions/25106675/why-does-removal-of-empty-lines-from-multiline-string-in-powershell-fail-using-r/25110997
     ($Process | select * -Excl UserName | sort -Unique Path | FT -Au | Out-String).Trim() | Out-File $logFile -Append -Width 500
     # Finish-Script; Return
 } else {
-"There is NO running Application '$App_Name' in user session." | Out-File $logFile -Append
+$Msg = "There is NO running App '$App_Name' in user session."; echo $Msg; $Msg | Out-File $logFile -Append
 
 try { # для обработки ошибок интернет запросов
 
@@ -111,10 +114,10 @@ if (!$Reg_Uninst_Item) { # Если наш софт вообще НЕ был у�
     if ($RIP.BundleCachePath -match ".+\\(.+\.exe)") { $Soft_orig_installer = $Matches[1] } # имя EXE-инсталлятора установленного приложения
 
     if ($Soft_orig_installer -eq $Soft2.fileName) { # Если установленное приложение является актуальным
-        "Installed application '$($RIP.DisplayName)' has actual version $($RIP.DisplayVersion)" | Out-File $logFile -Append
+        $Msg = "Installed application '$($RIP.DisplayName)' has actual version $($RIP.DisplayVersion)"; echo $Msg; $Msg | Out-File $logFile -Append
         $Soft_Install_required = $false
     } else { # Если версия установленного приложения отличается от актуальной
-        "Already installed old Application:" | Out-File $logFile -Append
+        $Msg = "Already installed old App '$($RIP.DisplayName)' $($RIP.DisplayVersion)"; echo $Msg; $Msg | Out-File $logFile -Append
         ($RIP | select @("DisplayName", "DisplayVersion", "QuietUninstallString", "BundleProviderKey", "BundleCachePath") | FL | Out-String).Trim() | Out-File $logFile -Append -Width 500
         # $Soft_DispName = $RIP.DisplayName;  $Soft_Ver = $RIP.DisplayVersion; $Soft_UnInst_Str = $RIP.QuietUninstallString; $Soft_BundleCachePath = $RIP.BundleCachePath; $Soft_BundleProviderKey = $RIP.BundleProviderKey
         
@@ -127,7 +130,7 @@ if (!$Reg_Uninst_Item) { # Если наш софт вообще НЕ был у�
 }
 if ($Soft_Install_required) { # Если принято решение обновлять приложение и все условия для этого есть
 
-"Actual Application available from Internet is:" | Out-File $logFile -Append
+$Msg = "Actual App version available from Internet is $($Soft2.version) $($Soft2.build)"; echo $Msg; $Msg | Out-File $logFile -Append
 ($Soft2 | select title, version, build, releaseDate, fileSize, description, thirdPartyDownloadUrl, sha256checksum | FL | Out-String).Trim() | Out-File $logFile -Append -Width 500
 
 # Готовим папку для дистрибутива приложения
@@ -140,7 +143,7 @@ $ProgressPreference = 'SilentlyContinue' # решаем проблему с бе
 
 # Скачиваем EXE-инсталлятор софта в текущую папку
 # -OutFile Specifies the output file for which this cmdlet saves the response body. Enter a path and file name. If you omit the path, the default is the current location. The name is treated as a literal path.
-"$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start downloading from Internet the actual version of App '$App_Name' " | Out-File $logFile -Append
+$Msg = "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start downloading from Internet the actual version of App '$App_Name' "; echo $Msg; $Msg | Out-File $logFile -Append
 Invoke-WebRequest -Uri $Soft2.thirdPartyDownloadUrl -OutFile $Soft2.fileName
 
 $ProgressPreference = 'Continue'
@@ -148,9 +151,10 @@ $ProgressPreference = 'Continue'
 # На время обновления приложения заблокировать юзеру его запуск
 # "C:\ProgramData\Microsoft\Windows\Start Menu\Programs" 
 
-"$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start the Installation of new version of Application." | Out-File $logFile -Append
+$Msg = "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start the Installation of App '$App_Name'"; echo $Msg; $Msg | Out-File $logFile -Append
 $Process = Start-Process -FilePath $Soft2.fileName -ArgumentList $App_setup_params -Wait -PassThru;  $LastExitCode = $Process.ExitCode
-"$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - The installation time for a new version of App '$App_Name' is " + [int]($process.ExitTime - $process.StartTime).TotalSeconds + " seconds with ExitCode $LastExitCode" | Out-File $logFile -Append
+$Msg = "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - The installation time for a new version of App '$App_Name' is " + [int]($process.ExitTime - $process.StartTime).TotalSeconds + " seconds with ExitCode $LastExitCode"
+echo $Msg; $Msg | Out-File $logFile -Append
 
 }
 } catch [System.Net.WebException] { # обработка ошибок интернет запросов
@@ -183,19 +187,19 @@ $Reg_Uninst_Item = Get-ChildItem $Reg_path | ? { (GP $_.PSpath -Name "DisplayNam
 
 if (-Not $Reg_Uninst_Item) # Наше приложение в системе отсутствует ?
 {   # ДА, Наше приложение еще НЕ установлено
-    "In this system is NOT Installed App '$App_Name'" | Out-File $logFile -Append
+    $Msg = "In this system is NOT Installed App '$App_Name'"; echo $Msg; $Msg | Out-File $logFile -Append
     $App_ver = "0"
 } else { # Наше приложение уже установлено в системе
     $RIP = Get-ItemProperty $Reg_Uninst_Item.PSPath;  # Извлекаем инфу об уже установленном ПО.
     $App_ver = $RIP.DisplayVersion
-    "Found already Installed application '$($RIP.Publisher) $($RIP.DisplayName)' $App_ver." | Out-File $logFile -Append
+    $Msg = "Found already Installed application '$($RIP.Publisher) $($RIP.DisplayName)' $App_ver."; echo $Msg; $Msg | Out-File $logFile -Append
 }
 if ($App_ver -lt "12.02.0.0") { # Если текущая установленная версия ниже целевой либо отсутствует вовсе, то приступаем к загрузке и установке ПО
 
     # Скачиваем EXE-инсталлятор софта в текущую папку по ссылке со страницы "https://dmwr.nornik.ru/dwnl/advancedDownload.html?dl=UR1M0GZ7"
     # $URI = "https://dmwr.nornik.ru/dwnl/binary/SolarWinds-Dameware-Agent-x64.exe";  if ($URI -match ".+\/(\S+\.exe)$") { $Inst_Exe = $Matches[1] }
 
-    "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start downloading from Internet the App 'DameWare MRC agent' " | Out-File $logFile -Append
+    $Msg = "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start downloading from Internet the App 'DameWare MRC agent' "; echo $Msg; $Msg | Out-File $logFile -Append
 
 try { # для обработки ошибок интернет запросов
 
@@ -207,7 +211,7 @@ try { # для обработки ошибок интернет запросов
     $ProgressPreference = 'Continue'
     
     # Запускаем инсталляцию ПО как msiexec.exe MSI+MST. В случае успеха установки, когда ExitCode=0 - параметрами реестра донастраивает ПО.
-    "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start the Installation of Application as MSIexec with MSI+MST." | Out-File $logFile -Append
+    $Msg = "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start the Installation of Application as MSIexec with MSI+MST."; echo $Msg; $Msg | Out-File $logFile -Append
     $Process = Start-Process "MSIexec.exe" -Arg $App_setup_params -Wait -PassThru -EV Err
             
     # https://documentation.solarwinds.com/en/success_center/dameware/content/mrc_client_agent_service_installation_methods.htm
@@ -217,7 +221,13 @@ try { # для обработки ошибок интернет запросов
     # https://www.itninja.com/software/dameware-development/dameware-mini-remote-control-client-agent-service/7-1052
     # $Process = Start-Process $Inst_Exe -Arg "/args ""/qn TRANSFORMS=$Inst_MST OVERWRITEREMOTECFG=1 reboot=reallysuppress SILENT=yes""" -Wait -PassThru -EV Err
   
-    if ($Err) { "Installator is NOT executed normally ! `n MSIexec.exe $App_setup_params" | Out-File $logFile -Append }     else {    $ExitCode = $Process.ExitCode    ("$(Get-Date -format "yyyy-MM-dd HH:mm:ss") Duration of Installation for this App: " + [int]($process.ExitTime - $process.StartTime).TotalSeconds + " seconds,  ExitCode: " + $ExitCode) | Out-File $logFile -Append    if ($ExitCode -eq 0) {
+    if ($Err) { "Installator is NOT executed normally ! `n MSIexec.exe $App_setup_params" | Out-File $logFile -Append } 
+    else {
+    $ExitCode = $Process.ExitCode
+    $Msg = "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") Duration of Installation for this App: " + [int]($process.ExitTime - $process.StartTime).TotalSeconds + " seconds,  ExitCode: " + $ExitCode
+    echo $Msg; $Msg | Out-File $logFile -Append
+
+    if ($ExitCode -eq 0) {
         $RegPath = 'HKLM:\SOFTWARE\DameWare Development\Mini Remote Control Service\Settings'
         if (-Not (Test-Path $RegPath)) { New-Item -Path $RegPath -Force | Out-Null }
 
@@ -237,7 +247,7 @@ $Msg = @() # Различные признаки необходимости пе
 if (Test-Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending") { $Msg += "RebootPending" }
 if (Test-Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Component Based Servicing\PackagesPending") { $Msg += "PackagesPending" }
 # HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager
-if ($Msg) { "Detected Component Based Servicing pending operations - " + [string]$Msg | Out-File $logFile -Append }
+if ($Msg) { $Msg = "Detected Component Based Servicing pending operations - " + [string]$Msg; echo $Msg; $Msg | Out-File $logFile -Append }
 
 # Автоматическое обновления скрипта на случай будущих изменений/улучшений в данном скрипте-автоматике.
 Pop-Location
