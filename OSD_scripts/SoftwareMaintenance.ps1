@@ -1,7 +1,7 @@
 ﻿<# 
 Скрипт выполняет обслуживание корпоративного программного обеспечения и его конфигуририрование при работе специальной заливки для удаленки за пределами КСПД.
 На данный момент реализовано автоматическое обновление через интернет клиента VMware Horizon и установка DameWare MRC с нашего сервера.
-Автор - Максим Баканов 2022-02-03
+Автор - Максим Баканов 2022-02-08
 #>
 
 
@@ -110,12 +110,14 @@ $URI = "customerconnect.vmware.com/channel/public/api/v1.0/dlg/details?locale=en
 $Soft2 = ((Invoke-WebRequest -Uri $URI -UseBasicParsing).Content | ConvertFrom-JSON).downloadFiles
 
 # Для поиска установленного приложения - работаем с обоими ветками реестра Uninstall для 32-бит и 64-бит вариантов. Выибираем софт по названию DisplayName и без признака SystemComponent=1
-$Reg_path = "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall";  $Reg_path_to_Unistall = @($Reg_path -replace "WOW6432Node\\"); if (Test-Path $Reg_path) { $Reg_path_to_Unistall += $Reg_path }
+$Reg_path = "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall";  $Reg_path_to_Unistall = @($Reg_path -replace "WOW6432Node\\"); 
+if ((Test-Path $Reg_path) -and [Environment]::Is64BitProcess) { $Reg_path_to_Unistall += $Reg_path }
 $Reg_Uninst_Item = $Reg_path_to_Unistall | % { Get-ChildItem $_ } | ? { (GP $_.PSpath -Name "DisplayName" -EA 0).DisplayName -match $App_Name -and (GP $_.PSpath -Name "SystemComponent" -EA 0).SystemComponent -ne 1 } 
 # альяс GP для команды найден так: Alias | ? { $_.ResolvedCommandName -match "Get-ItemProp" }
 
 if (($Reg_Uninst_Item | measure).Count -ge 2) { # внутренняя недораобтка в скрипте при поиске инфы об установленном софте - найдено несколько разделов Uninstall в реестре
     "Internal script error: in registry in Uninstall area found 2 or more sections with info about App!" | Out-File $logFile -Append
+    Get-ItemProperty $Reg_Uninst_Item.PSPath | % { $_.DisplayName + ' ' + $_.DisplayVersion } | Out-File $logFile -Append
     Finish-Script; Return
 }
 
