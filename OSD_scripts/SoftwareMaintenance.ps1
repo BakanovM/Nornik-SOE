@@ -244,7 +244,7 @@ try { # для обработки ошибок интернет запросов
     echo $Msg; $Msg | Out-File $logFile -Append
 
     if ($ExitCode -eq 0) {
-        if (Test-Path $App_Reg_Path) { $Msg = Get-ItemProperty $App_Reg_Path -EA 0 } else { $Msg = "Not found registry key !" }; Write-Debug "DameWare Settings in registry $Reg_path : `n $Msg";
+        if (Test-Path $App_Reg_Path) { $Msg = Get-ItemProperty $App_Reg_Path -EA 0 } else { $Msg = "Not found registry key !" }; Write-Debug "DameWare Settings in registry $Reg_path : `n $Msg"; 
 
         # Задаем список локальных и доменных групп, члены которых рулят в DameWare (в т.ч. и AD группа полевых инженеров)
         # Многообразие групп доступа к Remote Control - https://social.technet.microsoft.com/Forums/ru-RU/8e32ab4c-bb03-4aff-a0e9-1c95da58881c/105210851086107510861086107310881072107910801077
@@ -257,8 +257,6 @@ try { # для обработки ошибок интернет запросов
                 New-ItemProperty -Path $App_Reg_Path -Name "Group $_" -Value $Groups_list[$_] -PropertyType String -Force | Out-Null  # При обычном исполнении в 64-битной среде
             }
         }
-        # Перезапускаем службу чтобы сразу после установки ПО оно заработало с заданными настройками.
-        Get-Service DWMRCS | Restart-Service # DameWare Mini Remote Control
     }}
 } catch [System.Net.WebException] { # обработка ошибок интернет запросов
     $Msg = "System.Net.WebException - Exception.Status: {0}, Exception.Response.StatusCode: {1}, {2} `n{3}" -f $_.Exception.Status, $_.Exception.Response.StatusCode, $_.Exception.Message, $_.Exception.Response.ResponseUri.AbsoluteURI
@@ -269,6 +267,11 @@ try { # для обработки ошибок интернет запросов
 if (-Not (Test-Path $App_Reg_Path)) { New-Item -Path $App_Reg_Path -Force | Out-Null }
 New-ItemProperty -Path $App_Reg_Path -Name "Permission Required" -Value 0 -Force | Out-Null
 New-ItemProperty -Path $App_Reg_Path -Name "Permission Required for non Admin" -Value 1 -Force | Out-Null
+
+if ($ExitCode -eq 0) {
+# Перезапускаем службу чтобы сразу после установки ПО оно заработало с заданными настройками.
+Get-Service DWMRCS | Restart-Service # DameWare Mini Remote Control
+}
 
 ####### Установка/обновление DameWare - закончено #######
 
@@ -303,3 +306,5 @@ if ($Web_ETag -ne $Reg_value) { # обнаружена новая версия �
 
 $ProgressPreference = $Progr_Pref # восстанавливаем прогресс бар
 Finish-Script; Return
+
+#   
