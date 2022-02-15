@@ -1,9 +1,8 @@
-﻿<# 
+﻿<#
 Скрипт выполняет обслуживание корпоративного программного обеспечения и его конфигуририрование при работе специальной заливки для удаленки за пределами КСПД.
 На данный момент реализовано автоматическое обновление через интернет клиента VMware Horizon и установка DameWare MRC с нашего сервера.
 Автор - Максим Баканов 2022-02-15
 #>
-
 
 # Название приложения, по которому будет производится поиск в реестре и по которому будут распознаваться запущенные процессы приложения.
 $App_Name = "VMware Horizon Client";  
@@ -214,6 +213,7 @@ if (-Not $Reg_Uninst_Item) # Наше приложение в системе о�
 echo $Msg; $Msg | Out-File $logFile -Append
 
 # Настриваем DameWare MRC чтобы агент не справшивал у пользователя подтверждения на входящее подключение к графическому сеансу
+if (-Not (Test-Path $App_Reg_Path)) { New-Item -Path $App_Reg_Path -Force | Out-Null }
 New-ItemProperty -Path $App_Reg_Path -Name "Permission Required" -Value 0 -Force | Out-Null
 New-ItemProperty -Path $App_Reg_Path -Name "Permission Required for non Admin" -Value 1 -Force | Out-Null
 
@@ -249,9 +249,7 @@ try { # для обработки ошибок интернет запросов
     echo $Msg; $Msg | Out-File $logFile -Append
 
     if ($ExitCode -eq 0) {
-        if (Test-Path $App_Reg_Path) { $Msg = Get-ItemProperty $App_Reg_Path -EA 0 } else { $Msg = "Not found registry key !" }
-        Write-Debug "DameWare Settings in registry $Reg_path : `n $Msg"; 
-        if (-Not (Test-Path $App_Reg_Path)) { New-Item -Path $App_Reg_Path -Force | Out-Null }
+        if (Test-Path $App_Reg_Path) { $Msg = Get-ItemProperty $App_Reg_Path -EA 0 } else { $Msg = "Not found registry key !" }; Write-Debug "DameWare Settings in registry $Reg_path : `n $Msg";
 
         # Задаем список локальных и доменных групп, члены которых рулят в DameWare (в т.ч. и AD группа полевых инженеров)
         # Многообразие групп доступа к Remote Control - https://social.technet.microsoft.com/Forums/ru-RU/8e32ab4c-bb03-4aff-a0e9-1c95da58881c/105210851086107510861086107310881072107910801077
@@ -304,4 +302,3 @@ if ($Web_ETag -ne $Reg_value) { # обнаружена новая версия �
 
 $ProgressPreference = $Progr_Pref # восстанавливаем прогресс бар
 Finish-Script; Return
-
