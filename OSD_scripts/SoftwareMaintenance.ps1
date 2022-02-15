@@ -1,7 +1,7 @@
 ﻿<# 
 Скрипт выполняет обслуживание корпоративного программного обеспечения и его конфигуририрование при работе специальной заливки для удаленки за пределами КСПД.
 На данный момент реализовано автоматическое обновление через интернет клиента VMware Horizon и установка DameWare MRC с нашего сервера.
-Автор - Максим Баканов 2022-02-08
+Автор - Максим Баканов 2022-02-15
 #>
 
 
@@ -109,13 +109,15 @@ $Soft = ($WebPage_getRelatedDLGList_JSON.dlgEditionsLists | where name -Match "f
 $URI = "customerconnect.vmware.com/channel/public/api/v1.0/dlg/details?locale=en_US&downloadGroup=$($Soft.code)&productId=$($Soft.productId)&rPId=$($Soft.releasePackageId)"
 $Soft2 = ((Invoke-WebRequest -Uri $URI -UseBasicParsing).Content | ConvertFrom-JSON).downloadFiles
 
+if ($Env:Processor_ArchiteW6432) { Write-Debug "Detected WoW64 powershell host" };  if ([IntPtr]::size -eq 4) { Write-Debug "This is a 32 bit process" }
+
 # Для поиска установленного приложения - работаем с обоими ветками реестра Uninstall для 32-бит и 64-бит вариантов. Выибираем софт по названию DisplayName и без признака SystemComponent=1
 $Reg_path = "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall";  $Reg_path_to_Unistall = @($Reg_path -replace "WOW6432Node\\"); 
-if ((Test-Path $Reg_path) -and [Environment]::Is64BitProcess) { $Reg_path_to_Unistall += $Reg_path }
+if ((Test-Path $Reg_path) -and [Environment]::Is64BitProcess) { $Reg_path_to_Unistall += $Reg_path } 
 $Reg_Uninst_Item = $Reg_path_to_Unistall | % { Get-ChildItem $_ } | ? { (GP $_.PSpath -Name "DisplayName" -EA 0).DisplayName -match $App_Name -and (GP $_.PSpath -Name "SystemComponent" -EA 0).SystemComponent -ne 1 } 
 # альяс GP для команды найден так: Alias | ? { $_.ResolvedCommandName -match "Get-ItemProp" }
 
-if (($Reg_Uninst_Item | measure).Count -ge 2) { # внутренняя недораобтка в скрипте при поиске инфы об установленном софте - найдено несколько разделов Uninstall в реестре
+if (($Reg_Uninst_Item | measure).Count -ge 2) { # при поиске инфы об установленном софте найдено несколько разделов Uninstall в реестре, возможно недоработка в скрипте, втретился редкий случай.
     "Internal script error: in registry in Uninstall area found 2 or more sections with info about App!" | Out-File $logFile -Append
     Get-ItemProperty $Reg_Uninst_Item.PSPath | % { $_.DisplayName + ' ' + $_.DisplayVersion } | Out-File $logFile -Append
     Finish-Script; Return
@@ -185,6 +187,9 @@ if ($URI -match ".+\/(\S+\.MSI)$") { $Inst_MSI = $Matches[1] };  $Inst_MST = $In
 # Строка аргументов запсука MSIexe инсталлятора приложения. (Исключить параметр /norestart нельзя, т.к. инсталлятор сразу отправит винду в перезагрузку и скрипт даже не успеет записать в лог об успешном завершении инсталляции)
 $App_setup_params = "/i $Inst_MSI TRANSFORMS=$Inst_MST /qn /Log $Env:windir\Temp\DameWare_MRC_install.log"
 
+# Путь к ветке реестра с настройками приложения
+$App_Reg_Path = 'HKLM:\SOFTWARE\DameWare Development\Mini Remote Control Service\Settings'
+
 # Готовим папку для дистрибутива приложения
 $Path = $App_setup_path + '\DameWare_MRC_Agent'; New-Item $Path -ItemType Directory -Force | Out-Null; Set-Location $Path
 
@@ -193,14 +198,25 @@ $Reg_path = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall";
 $Reg_Uninst_Item = Get-ChildItem $Reg_path | ? { (GP $_.PSpath -Name "DisplayName" -EA 0).DisplayName -match $App_Name }
 
 if (-Not $Reg_Uninst_Item) # Наше приложение в системе отсутствует ?
-{   # ДА, Наше приложение еще НЕ установлено
-    $Msg = "In this system is NOT Installed App '$App_Name'"; echo $Msg; $Msg | Out-File $logFile -Append
-    $App_ver = "0"
+{   # ДА, Наше приложение еще НЕ установлено, точнее по инфе из Uninstall раздела реестра (который может быть недоступен при WoW64)
+
+    if ($Env:Processor_ArchiteW6432) { # Приходится выкручиваться в случае 32-бит среды исполнения и потребности в обслуживании 64-битного ПО.
+        [String]$Reg64 = reg.exe Query "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{EA9A6570-008F-4F5F-ADF6-21AD5CB2D751}" /v "DisplayVersion" /Reg:64
+        if ($Reg64 -match "DisplayVersion\s+REG_SZ\s+(.+)") { $App_ver = $Matches[1]; $Msg = "Found already Installed application '$App_Name' $App_ver (in WoW64)." }
+    } else { 
+        $Msg = "In this system is NOT Installed App '$App_Name'"; $App_ver = "0" 
+    }
 } else { # Наше приложение уже установлено в системе
     $RIP = Get-ItemProperty $Reg_Uninst_Item.PSPath;  # Извлекаем инфу об уже установленном ПО.
     $App_ver = $RIP.DisplayVersion
-    $Msg = "Found already Installed application '$($RIP.Publisher) $($RIP.DisplayName)' $App_ver."; echo $Msg; $Msg | Out-File $logFile -Append
+    $Msg = "Found already Installed application '$($RIP.Publisher) $($RIP.DisplayName)' $App_ver."
 }
+echo $Msg; $Msg | Out-File $logFile -Append
+
+# Настриваем DameWare MRC чтобы агент не справшивал у пользователя подтверждения на входящее подключение к графическому сеансу
+New-ItemProperty -Path $App_Reg_Path -Name "Permission Required" -Value 0 -Force | Out-Null
+New-ItemProperty -Path $App_Reg_Path -Name "Permission Required for non Admin" -Value 1 -Force | Out-Null
+
 if ($App_ver -lt "12.02.0.0") { # Если текущая установленная версия ниже целевой либо отсутствует вовсе, то приступаем к загрузке и установке ПО
 
     # Скачиваем EXE-инсталлятор софта в текущую папку по ссылке со страницы "https://dmwr.nornik.ru/dwnl/advancedDownload.html?dl=UR1M0GZ7"
@@ -233,13 +249,23 @@ try { # для обработки ошибок интернет запросов
     echo $Msg; $Msg | Out-File $logFile -Append
 
     if ($ExitCode -eq 0) {
-        $RegPath = 'HKLM:\SOFTWARE\DameWare Development\Mini Remote Control Service\Settings'
-        if (-Not (Test-Path $RegPath)) { New-Item -Path $RegPath -Force | Out-Null }
+        if (Test-Path $App_Reg_Path) { $Msg = Get-ItemProperty $App_Reg_Path -EA 0 } else { $Msg = "Not found registry key !" }
+        Write-Debug "DameWare Settings in registry $Reg_path : `n $Msg"; 
+        if (-Not (Test-Path $App_Reg_Path)) { New-Item -Path $App_Reg_Path -Force | Out-Null }
 
         # Задаем список локальных и доменных групп, члены которых рулят в DameWare (в т.ч. и AD группа полевых инженеров)
         # Многообразие групп доступа к Remote Control - https://social.technet.microsoft.com/Forums/ru-RU/8e32ab4c-bb03-4aff-a0e9-1c95da58881c/105210851086107510861086107310881072107910801077
         $Groups_list = @('Administrators', 'Администраторы', 'Пользователи удаленного управления ConfigMgr', 'Пользователи удаленного управления Configuration Manager', 'ConfigMgr Remote Control Users', 'NPR\$Engineers') 
-        0..($Groups_list.Count-1) | % { New-ItemProperty -Path $RegPath -Name "Group $_" -Value $Groups_list[$_] -PropertyType String -Force | Out-Null }
+
+        0..($Groups_list.Count-1) | % { 
+            if ($Env:Processor_ArchiteW6432) { # Приходится выкручиваться в случае 32-бит среды исполнения и потребности в настройке реестра для 64-битного ПО
+                reg.exe Add ($App_Reg_Path -replace ':') /v "Group $_" /d $Groups_list[$_] /Reg:64 /f | Out-Null
+            } else {
+                New-ItemProperty -Path $App_Reg_Path -Name "Group $_" -Value $Groups_list[$_] -PropertyType String -Force | Out-Null  # При обычном исполнении в 64-битной среде
+            }
+        }
+        # Перезапускаем службу чтобы сразу после установки ПО оно заработало с заданными настройками.
+        Get-Service DWMRCS | Restart-Service # DameWare Mini Remote Control
     }}
 } catch [System.Net.WebException] { # обработка ошибок интернет запросов
     $Msg = "System.Net.WebException - Exception.Status: {0}, Exception.Response.StatusCode: {1}, {2} `n{3}" -f $_.Exception.Status, $_.Exception.Response.StatusCode, $_.Exception.Message, $_.Exception.Response.ResponseUri.AbsoluteURI
