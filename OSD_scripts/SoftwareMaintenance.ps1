@@ -212,11 +212,6 @@ if (-Not $Reg_Uninst_Item) # Наше приложение в системе о�
 }
 echo $Msg; $Msg | Out-File $logFile -Append
 
-# Настриваем DameWare MRC чтобы агент не справшивал у пользователя подтверждения на входящее подключение к графическому сеансу
-if (-Not (Test-Path $App_Reg_Path)) { New-Item -Path $App_Reg_Path -Force | Out-Null }
-New-ItemProperty -Path $App_Reg_Path -Name "Permission Required" -Value 0 -Force | Out-Null
-New-ItemProperty -Path $App_Reg_Path -Name "Permission Required for non Admin" -Value 1 -Force | Out-Null
-
 if ($App_ver -lt "12.02.0.0") { # Если текущая установленная версия ниже целевой либо отсутствует вовсе, то приступаем к загрузке и установке ПО
 
     # Скачиваем EXE-инсталлятор софта в текущую папку по ссылке со страницы "https://dmwr.nornik.ru/dwnl/advancedDownload.html?dl=UR1M0GZ7"
@@ -269,7 +264,13 @@ try { # для обработки ошибок интернет запросов
     $Msg = "System.Net.WebException - Exception.Status: {0}, Exception.Response.StatusCode: {1}, {2} `n{3}" -f $_.Exception.Status, $_.Exception.Response.StatusCode, $_.Exception.Message, $_.Exception.Response.ResponseUri.AbsoluteURI
     "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - $Msg" | Out-File $logFile -Append
 }
-}  ####### Установка/обновление DameWare - закончено #######
+}
+# Настриваем DameWare MRC чтобы агент не справшивал у пользователя подтверждения на входящее подключение к графическому сеансу
+if (-Not (Test-Path $App_Reg_Path)) { New-Item -Path $App_Reg_Path -Force | Out-Null }
+New-ItemProperty -Path $App_Reg_Path -Name "Permission Required" -Value 0 -Force | Out-Null
+New-ItemProperty -Path $App_Reg_Path -Name "Permission Required for non Admin" -Value 1 -Force | Out-Null
+
+####### Установка/обновление DameWare - закончено #######
 
 
 $Msg = @() # Различные признаки необходимости перезапуска системы описаны тут: https://adamtheautomator.com/pending-reboot-registry/
