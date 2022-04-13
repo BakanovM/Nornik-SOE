@@ -1,8 +1,9 @@
-﻿<#
+﻿<# 
 Скрипт выполняет обслуживание корпоративного программного обеспечения и его конфигуририрование при работе специальной заливки для удаленки за пределами КСПД.
 На данный момент реализовано автоматическое обновление через интернет клиента VMware Horizon и установка DameWare MRC с нашего сервера.
-Автор - Максим Баканов 2022-02-15
+Автор - Максим Баканов 2022-04-13
 #>
+
 
 # Название приложения, по которому будет производится поиск в реестре и по которому будут распознаваться запущенные процессы приложения.
 $App_Name = "VMware Horizon Client";  
@@ -11,7 +12,7 @@ $App_Name = "VMware Horizon Client";
 $App_Vendor = "VMware"
 
 # Строка параметров для EXE-инсталлятора приложения. Исключить параметр /norestart нельзя, т.к. инсталлятор сразу отправит винду в перезагрузку и скрипт даже не успеет записать в лог об успешном завершении инсталляции.
-$App_setup_params = "/silent /norestart VDM_SERVER=HV.nornik.ru LOGINASCURRENTUSER_DEFAULT=1 INSTALL_SFB=1 INSTALL_HTML5MMR=1"
+$App_setup_params = "/silent /norestart VDM_SERVER=HV.nornik.ru INSTALL_SFB=1 INSTALL_HTML5MMR=1" # параметр LOGINASCURRENTUSER_DEFAULT=1 полезен токо для domain-joined компов
 
 
 # Задаем Лог-файл действий моего скрипта и путь-имя данного скрипта для случаев как штатного исполнения внутри скрипта, так и для случая интерактивной отладки
@@ -81,6 +82,11 @@ if ($env:Tools) {
     $App_setup_path = $env:WinDir + '\Temp\'
 }
 
+
+# Configure VMware URL Content Redirection,  https://docs.vmware.com/en/VMware-Horizon/2111/horizon-remote-desktop-features/GUID-2D2D33AA-0B0A-45B4-B8A2-19CDCD02A634.html
+# Install the URL Content Redirection Helper Extension for Microsoft Edge (Chromium) on Windows,  https://docs.vmware.com/en/VMware-Horizon/2111/horizon-remote-desktop-features/GUID-F88E146C-B1C4-46EC-880A-8AF5173A0F98.html
+
+
 ####### Авто-обновление клиента VMware Horizon - начало #######
 
 # Проверяем есть ли запущенные процессы обновляемого приложения, которые могут помешать ходу его обновления.
@@ -145,6 +151,13 @@ if (!$Reg_Uninst_Item) { # Если наш софт вообще НЕ был у�
 }
 if ($Soft_Install_required) { # Если принято решение обновлять приложение и все условия для этого есть
 
+# Потребовались исключения в автоматическом обновлении Horizon Client в связи единичными случаями проблемы в работе новых версий клиента 8.4.0 и 8.5.0 при старом агенте Horizon 8.2.0
+$Comp_list_Exclude = @("nMs27008","v-Bak-Sar76") # ZakharinskiyEYu
+if ($HostName -in $Comp_list_Exclude) { 
+    $Msg = "This computer is included in the list of exceptions for automatic update of software '$App_Name': $([string]$Comp_list_Exclude)"
+    echo $Msg; $Msg | Out-File $logFile -Append
+} else {
+
 $Msg = "Actual App version available from Internet is ver$($Soft2.version) build$($Soft2.build)"; echo $Msg; $Msg | Out-File $logFile -Append
 ($Soft2 | select title, version, build, releaseDate, fileSize, description, thirdPartyDownloadUrl, sha256checksum | FL | Out-String).Trim() | Out-File $logFile -Append -Width 500
 
@@ -163,8 +176,7 @@ $Msg = "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start the Installation of Ap
 $Process = Start-Process -FilePath $Soft2.fileName -ArgumentList $App_setup_params -Wait -PassThru;  $LastExitCode = $Process.ExitCode
 $Msg = "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - The installation time for a new version of App '$App_Name' is " + [int]($process.ExitTime - $process.StartTime).TotalSeconds + " seconds with ExitCode $LastExitCode"
 echo $Msg; $Msg | Out-File $logFile -Append
-
-}
+}}
 } catch [System.Net.WebException] { # обработка ошибок интернет запросов
     $Msg = "System.Net.WebException - Exception.Status: {0}, Exception.Response.StatusCode: {1}, {2} `n{3}" -f $_.Exception.Status, $_.Exception.Response.StatusCode, $_.Exception.Message, $_.Exception.Response.ResponseUri.AbsoluteURI
     # $_.Exception.Status = ProtocolError, $_.Exception.Response.StatusCode = NotFound, $_.Exception.Response.StatusDescription = "Not Found",  $_.Exception.Response.GetType().Name = HttpWebResponse
@@ -237,14 +249,7 @@ try { # для обработки ошибок интернет запросов
     # https://www.itninja.com/software/dameware-development/dameware-mini-remote-control-client-agent-service/7-1052
     # $Process = Start-Process $Inst_Exe -Arg "/args ""/qn TRANSFORMS=$Inst_MST OVERWRITEREMOTECFG=1 reboot=reallysuppress SILENT=yes""" -Wait -PassThru -EV Err
   
-    if ($Err) { "Installator is NOT executed normally ! `n MSIexec.exe $App_setup_params" | Out-File $logFile -Append } 
-    else {
-    $ExitCode = $Process.ExitCode
-    $Msg = "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") Duration of Installation for this App: " + [int]($process.ExitTime - $process.StartTime).TotalSeconds + " seconds,  ExitCode: " + $ExitCode
-    echo $Msg; $Msg | Out-File $logFile -Append
-
-    if ($ExitCode -eq 0) {
-        if (Test-Path $App_Reg_Path) { $Msg = Get-ItemProperty $App_Reg_Path -EA 0 } else { $Msg = "Not found registry key !" }; Write-Debug "DameWare Settings in registry $Reg_path : `n $Msg"; 
+    if ($Err) { "Installator is NOT executed normally ! `n MSIexec.exe $App_setup_params" | Out-File $logFile -Append }     else {    $ExitCode = $Process.ExitCode    $Msg = "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") Duration of Installation for this App: " + [int]($process.ExitTime - $process.StartTime).TotalSeconds + " seconds,  ExitCode: " + $ExitCode    echo $Msg; $Msg | Out-File $logFile -Append    if ($ExitCode -eq 0) {        if (Test-Path $App_Reg_Path) { $Msg = Get-ItemProperty $App_Reg_Path -EA 0 } else { $Msg = "Not found registry key !" }; Write-Debug "DameWare Settings in registry $Reg_path : `n $Msg"; 
 
         # Задаем список локальных и доменных групп, члены которых рулят в DameWare (в т.ч. и AD группа полевых инженеров)
         # Многообразие групп доступа к Remote Control - https://social.technet.microsoft.com/Forums/ru-RU/8e32ab4c-bb03-4aff-a0e9-1c95da58881c/105210851086107510861086107310881072107910801077
@@ -289,7 +294,8 @@ $URI = "https://github.com/BakanovM/Nornik-SOE/raw/main/OSD_scripts/$Script_Name
 try { $Web = IWR -Uri $URI -Method Head -UseBasicParsing } # Запрашиваем инфу о скрипте в инете - для того чтобы узнать обновился ли он
 catch { "Error request info for updated script! $($_.Exception.Message)" | Out-File $logFile -Append; Finish-Script; Return }
 $Web_ETag = $Web.Headers.ETag.Trim('"')
-$Reg_value = (Get-ItemProperty "HKLM:\SOFTWARE\Company" -Name $Reg_param -EA 0).$Reg_param
+$Reg_path = "HKLM:\SOFTWARE\Company" # ветка реестра со корпоративными параметрами в нашей организации (например название корп. заливки)
+$Reg_value = (Get-ItemProperty $Reg_path -Name $Reg_param -EA 0).$Reg_param
 
 if ($Web_ETag -ne $Reg_value) { # обнаружена новая версия скрипта в интернете
     "Found NEW version of script in Internet with ETag = $Web_ETag" | Out-File $logFile -Append
@@ -297,7 +303,7 @@ if ($Web_ETag -ne $Reg_value) { # обнаружена новая версия �
     try { IWR -Uri $URI -OutFile "$Script_Path.new" } # Загружаем обновленную версию скрипта скрипта из инетернет
     catch { "Error downloading updated script! $($_.Exception.Message)" | Out-File $logFile -Append; Finish-Script; Return }
 
-    Set-ItemProperty "HKLM:\SOFTWARE\Company" -Name $Reg_param -Value $Web_ETag -EA 0
+    New-Item $Reg_path -EA 0 | Out-Null; Set-ItemProperty $Reg_path -Name $Reg_param -Value $Web_ETag -EA 0
 
     echo "Self-updating of this Script $Script_Path" | Out-File $logFile -Append;  # Не подошел вариант Invoke-Command -AsJob
     # Set-Location $Script_Dir; Rename-Item $Script_Name -NewName "$Script_Name.old"; Rename-Item "$Script_Name.new" -NewName $Script_Name; Remove-Item "$Script_Name.old"
@@ -306,5 +312,3 @@ if ($Web_ETag -ne $Reg_value) { # обнаружена новая версия �
 
 $ProgressPreference = $Progr_Pref # восстанавливаем прогресс бар
 Finish-Script; Return
-
-#   
