@@ -96,7 +96,7 @@ if ($Process) {
 
 
 # Проверяем доступность интернета для загрузки актуальной версии нашего приложения
-$corp_proxy = "";  # в отладочных целях также предусмотрена загрузка из интернета через прокси, даже находясь в корп. сети.
+$corp_proxy = "vMs06wCG01";  # в отладочных целях также предусмотрена загрузка из интернета через прокси, даже находясь в корп. сети.
 $Test_Net1 = Test-NetConnection "ya.ru" -Port 443
 if ($Test_Net1.TcpTestSucceeded) { # есть ли прямое соединение с инетом ?
     $Msg = "Direct Internet connection is Working."; echo $Msg; $Msg | Out-File $logFile -Append
@@ -129,6 +129,7 @@ if ($Test_Net1.TcpTestSucceeded) { # есть ли прямое соединен
 Push-Location
 $Reg_param = "ETag_" + $Script_Name_no_ext # if ($Script_Name -match "(^.+)\..+") { $Reg_param = "ETag_" + $Matches[1] }
 $URI = "https://github.com/BakanovM/Nornik-SOE/raw/main/OSD_scripts/$Script_Name"
+"Requesting info about my script from Internet with URL: $URL" | Out-File $logFile -Append
 try { $Web = IWR -Uri $URI -Method Head -UseBasicParsing } # Запрашиваем инфу о скрипте в инете - для того чтобы узнать обновился ли он
 catch { "Error when requesting info about my script from Internet ! $($_.Exception.Message)" | Out-File $logFile -Append; Finish-Script; Return }
 $Web_ETag = $Web.Headers.ETag.Trim('"')
@@ -267,8 +268,8 @@ $Process = Start-Process -FilePath $Soft2.fileName -ArgumentList $App_setup_para
 $Msg = "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - The installation time for a new version of App '$App_Name' is " + [int]($process.ExitTime - $process.StartTime).TotalSeconds + " seconds with ExitCode $LastExitCode"
 echo $Msg; $Msg | Out-File $logFile -Append
 }}
-} catch [System.Net.WebException] { # обработка ошибок интернет запросов
-    $Msg = "System.Net.WebException - Exception.Status: {0}, Exception.Response.StatusCode: {1}, {2} `n{3}" -f $_.Exception.Status, $_.Exception.Response.StatusCode, $_.Exception.Message, $_.Exception.Response.ResponseUri.AbsoluteURI
+} catch { # [System.Net.WebException] обработка ошибок интернет запросов
+    $Msg = "Error in Web Requests - Exception.Status: {0}, Exception.Response.StatusCode: {1}, {2} `n{3}" -f $_.Exception.Status, $_.Exception.Response.StatusCode, $_.Exception.Message, $_.Exception.Response.ResponseUri.AbsoluteURI
     # $_.Exception.Status = ProtocolError, $_.Exception.Response.StatusCode = NotFound, $_.Exception.Response.StatusDescription = "Not Found",  $_.Exception.Response.GetType().Name = HttpWebResponse
     "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - $Msg" | Out-File $logFile -Append
 }
