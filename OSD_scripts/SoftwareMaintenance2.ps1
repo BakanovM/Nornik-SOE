@@ -5,7 +5,7 @@
 На данный момент реализовано автоматическое обновление через интернет клиента VMware Horizon и установка DameWare MRC с нашего сервера.
 Для запуска скрипта в 32-битной среде 64-разрядной ОС Win10 (например Каспером) лучше использовать запуск через "C:\Windows\SysNative\WindowsPowerShell\v1.0\PowerShell.exe"
 
-Автор - Максим Баканов 2022-10-25
+Автор - Максим Баканов 2022-10-26
 
 ToDo:
 + само-обновление скрипта нужно выполнять не после выполнения работ по обновлению ПО, а перед ними, т.е. в начале скрипта реализовать само-перезапуск, если в инете есть новая версия скрипта. Тогда можно быстро остановить массовые обновления косячной новой версии ПО.
@@ -85,11 +85,10 @@ $Sys_UpTime = (Get-Date) - (Get-CimInstance "Win32_OperatingSystem" | Select -Ex
 
 # Проверяем есть ли процессы от лок.адмиснкой учетки, чтобы не мешать своей автоматизацией тех. поддержке. 
 $Process = Get-Process -IncludeUserName | ? UserName -match "\\Install$" | where ProcessName -ne "conhost" | sort StartTime | select ProcessName,Description,StartTime,FileVersion,Path -Last 1
-if ($Process) {
+if ($Process2) { # отключил пока с 2206
     "Found process executed as Local Admin:`n$([string]$Process)" | Out-File $logFile -Append
     # Finish-Script; Return
 } 
-
 
 # По умолчанию PoSh в старой Win10 v1607 использует TLS 1.0, а современные сайты TLS 1.2 и можем получить error request secure channel SSL/TLS при вызове Invoke-WebRequest
 # https://stackoverflow.com/questions/41618766/powershell-invoke-webrequest-fails-with-ssl-tls-secure-channel
