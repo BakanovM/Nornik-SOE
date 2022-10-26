@@ -9,8 +9,9 @@
 
 ToDo:
 + само-обновление скрипта нужно выполнять не после выполнения работ по обновлению ПО, а перед ними, т.е. в начале скрипта реализовать само-перезапуск, если в инете есть новая версия скрипта. Тогда можно быстро остановить массовые обновления косячной новой версии ПО.
-+ для старой ОС Win10 LTSB 2016 v1607 нужно задать максимально применимую версию 8.4.0 2111.1 b19480429 2022-03-15
-+ Возможность скачивать не только из внешнего интернета, но также и через корп. прокси
++ для старой ОС Win10 LTSB 2016 v1607 нужно задать максимально применимую версию 8.4.0 2111.1 b19480429 2022-03-15;
++ ограничить авто-обновление определнной допустимой версией, выше которой авто-обновление работать не будет;
++ Возможность скачивать не только из внешнего интернета, но также и через корп. прокси;
 - Configure VMware URL Content Redirection
 - выключить LOGINASCURRENTUSER_DEFAULT в уже установленном клиенте Horizon
 - Пользователя оповестить о начале и окончании обновления приложения
@@ -85,7 +86,7 @@ $Sys_UpTime = (Get-Date) - (Get-CimInstance "Win32_OperatingSystem" | Select -Ex
 # Проверяем есть ли процессы от лок.адмиснкой учетки, чтобы не мешать своей автоматизацией тех. поддержке. 
 $Process = Get-Process -IncludeUserName | ? UserName -match "\\Install$" | where ProcessName -ne "conhost" | sort StartTime | select ProcessName,Description,StartTime,FileVersion,Path -Last 1
 if ($Process) {
-    "Found process executed as LA Install:`n$([string]$Process)" | Out-File $logFile -Append
+    "Found process executed as Local Admin:`n$([string]$Process)" | Out-File $logFile -Append
     # Finish-Script; Return
 } 
 
@@ -129,7 +130,7 @@ if ($Test_Net1.TcpTestSucceeded) { # есть ли прямое соединен
 Push-Location
 $Reg_param = "ETag_" + $Script_Name_no_ext # if ($Script_Name -match "(^.+)\..+") { $Reg_param = "ETag_" + $Matches[1] }
 $URI = "https://github.com/BakanovM/Nornik-SOE/raw/main/OSD_scripts/$Script_Name"
-"Requesting info about my script from Internet with URI: $URI" | Out-File $logFile -Append
+# "Requesting info about my script from Internet with URI: $URI" | Out-File $logFile -Append
 try { $Web = IWR -Uri $URI -Method Head -UseBasicParsing } # Запрашиваем инфу о скрипте в инете - для того чтобы узнать обновился ли он
 catch { "Error when requesting info about my script from Internet ! $($_.Exception.Message)" | Out-File $logFile -Append; Finish-Script; Return }
 $Web_ETag = $Web.Headers.ETag.Trim('"')
@@ -224,8 +225,7 @@ if (!$Reg_Uninst_Item) { # Если наш софт вообще НЕ был у�
         $Soft_Install_required = $false
     } else { # Если версия установленного приложения отличается от актуальной
         $Msg = "Already installed previous App '$($RIP.DisplayName)' $($RIP.DisplayVersion)"; echo $Msg; $Msg | Out-File $logFile -Append
-        ($RIP | select @("DisplayName", "DisplayVersion", "QuietUninstallString", "BundleProviderKey", "BundleUpgradeCode") | FL | Out-String).Trim() | Out-File $logFile -Append -Width 500
-        # $Soft_DispName = $RIP.DisplayName;  $Soft_Ver = $RIP.DisplayVersion; $Soft_UnInst_Str = $RIP.QuietUninstallString; $Soft_BundleCachePath = $RIP.BundleCachePath; $Soft_BundleProviderKey = $RIP.BundleProviderKey
+        # ($RIP | select @("DisplayName", "DisplayVersion", "QuietUninstallString", "BundleProviderKey", "BundleUpgradeCode") | FL | Out-String).Trim() | Out-File $logFile -Append -Width 500
         
         # Предварительная деинсталляция старой версии, для отката новой версии в условиях старой ОС (либо вообще, если инсталлятор приложения не поддерживает обновление "накатом")
         if ($Soft_orig_installer -gt $Soft2.fileName) {
