@@ -85,7 +85,7 @@ $Sys_UpTime = (Get-Date) - (Get-CimInstance "Win32_OperatingSystem" | Select -Ex
 
 # Проверяем есть ли процессы от лок.адмиснкой учетки, чтобы не мешать своей автоматизацией тех. поддержке. 
 $Process = Get-Process -IncludeUserName | ? UserName -match "\\Install$" | where ProcessName -ne "conhost" | sort StartTime | select ProcessName,Description,StartTime,FileVersion,Path -Last 1
-if ($Process2) { # отключил пока с 2206
+if ($Process2) { # отключил пока с вер 2206  
     "Found process executed as Local Admin:`n$([string]$Process)" | Out-File $logFile -Append
     # Finish-Script; Return
 } 
@@ -329,7 +329,7 @@ try { # для обработки ошибок интернет запросов
     # -OutFile Specifies the output file for which this cmdlet saves the response body. Enter a path and file name. If you omit the path, the default is the current location. The name is treated as a literal path.
     
     # Запускаем инсталляцию ПО как msiexec.exe MSI+MST. В случае успеха установки, когда ExitCode=0 - параметрами реестра донастраивает ПО.
-    $Msg = "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start the Installation of Application as MSIexec with MSI+MST."; echo $Msg; $Msg | Out-File $logFile -Append
+    $Msg = "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start the Installation: MSIexec.exe $App_setup_params"; echo $Msg; $Msg | Out-File $logFile -Append
     $Process = Start-Process "MSIexec.exe" -Arg $App_setup_params -Wait -PassThru -EV Err
             
     # https://documentation.solarwinds.com/en/success_center/dameware/content/mrc_client_agent_service_installation_methods.htm
