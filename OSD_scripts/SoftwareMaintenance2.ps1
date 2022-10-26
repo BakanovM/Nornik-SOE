@@ -287,6 +287,11 @@ if ($URI -match ".+\/(\S+\.MSI)$") { $Inst_MSI = $Matches[1] };  $Inst_MST = $In
 
 # Строка аргументов запсука MSIexe инсталлятора приложения. (Исключить параметр /norestart нельзя, т.к. инсталлятор сразу отправит винду в перезагрузку и скрипт даже не успеет записать в лог об успешном завершении инсталляции)
 $App_setup_params = "/i $Inst_MSI TRANSFORMS=$Inst_MST /qn /Log $Env:windir\Temp\DameWare_MRC_install.log"
+# https://documentation.solarwinds.com/en/success_center/dameware/content/mrc_client_agent_service_installation_methods.htm
+# $Process = Start-Process $Inst_Exe -Arg "-ap ""TRANSFORMS=$Inst_MST OVERWRITEREMOTECFG=1""" -Wait -PassThru -EV Err
+# https://support.solarwinds.com/SuccessCenter/s/article/Install-DRS-and-MRC-from-the-command-line?language=en_US
+# https://www.itninja.com/software/dameware-development/dameware-mini-remote-control-client-agent-service/7-1052
+# $Process = Start-Process $Inst_Exe -Arg "/args ""/qn TRANSFORMS=$Inst_MST OVERWRITEREMOTECFG=1 reboot=reallysuppress SILENT=yes""" -Wait -PassThru -EV Err
 
 # Путь к ветке реестра с настройками приложения
 $App_Reg_Path = 'HKLM:\SOFTWARE\DameWare Development\Mini Remote Control Service\Settings'
@@ -325,21 +330,21 @@ try { # для обработки ошибок интернет запросов
 
     # Скачиваем в текущую папку инсталлятор ПО в виде двух файлов MSI и MST.
     Invoke-WebRequest -Uri $URI  -OutFile $Inst_MSI
+    "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - End downloading $URI" | Out-File $logFile -Append
     Invoke-WebRequest -Uri $URI2 -OutFile $Inst_MST
+    "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - End downloading $URI2" | Out-File $logFile -Append
     # -OutFile Specifies the output file for which this cmdlet saves the response body. Enter a path and file name. If you omit the path, the default is the current location. The name is treated as a literal path.
     
-    # Запускаем инсталляцию ПО как msiexec.exe MSI+MST. В случае успеха установки, когда ExitCode=0 - параметрами реестра донастраивает ПО.
-    $Msg = "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start the Installation: MSIexec.exe $App_setup_params"; echo $Msg; $Msg | Out-File $logFile -Append
-    $Process = Start-Process "MSIexec.exe" -Arg $App_setup_params -Wait -PassThru -EV Err
-            
-    # https://documentation.solarwinds.com/en/success_center/dameware/content/mrc_client_agent_service_installation_methods.htm
-    # $Process = Start-Process $Inst_Exe -Arg "-ap ""TRANSFORMS=$Inst_MST OVERWRITEREMOTECFG=1""" -Wait -PassThru -EV Err
-
-    # https://support.solarwinds.com/SuccessCenter/s/article/Install-DRS-and-MRC-from-the-command-line?language=en_US
-    # https://www.itninja.com/software/dameware-development/dameware-mini-remote-control-client-agent-service/7-1052
-    # $Process = Start-Process $Inst_Exe -Arg "/args ""/qn TRANSFORMS=$Inst_MST OVERWRITEREMOTECFG=1 reboot=reallysuppress SILENT=yes""" -Wait -PassThru -EV Err
-  
-    if ($Err) { "Installator is NOT executed normally ! `n MSIexec.exe $App_setup_params" | Out-File $logFile -Append }     else {    $ExitCode = $Process.ExitCode    $Msg = "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") Duration of Installation for this App: " + [int]($process.ExitTime - $process.StartTime).TotalSeconds + " seconds,  ExitCode: " + $ExitCode    echo $Msg; $Msg | Out-File $logFile -Append    if ($ExitCode -eq 0) {        if (Test-Path $App_Reg_Path) { $Msg = Get-ItemProperty $App_Reg_Path -EA 0 } else { $Msg = "Not found registry key !" }; Write-Debug "DameWare Settings in registry $Reg_path : `n $Msg"; 
+    if (-Not (Test-Path $Inst_MSI)) {
+        "We can NOT start installation! Downloaded, but NOT exist MSI file - $Path\$Inst_MSI" | Out-File $logFile -Append
+    } else {
+        # Запускаем инсталляцию ПО как msiexec.exe MSI+MST. В случае успеха установки, когда ExitCode=0 - параметрами реестра донастраивает ПО.
+        $Msg = "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") - Start the Installation: MSIexec.exe $App_setup_params"; echo $Msg; $Msg | Out-File $logFile -Append
+        $Process = Start-Process "MSIexec.exe" -Arg $App_setup_params -Wait -PassThru -EV Err
+    }
+    if ($Err) { 
+        "Installation is NOT executed normally. Error $Err" | Out-File $logFile -Append 
+    } else {    $ExitCode = $Process.ExitCode    $Msg = "$(Get-Date -format "yyyy-MM-dd HH:mm:ss") Duration of Installation for this App: " + [int]($process.ExitTime - $process.StartTime).TotalSeconds + " seconds,  ExitCode: " + $ExitCode    echo $Msg; $Msg | Out-File $logFile -Append    if ($ExitCode -eq 0) {        if (Test-Path $App_Reg_Path) { $Msg = Get-ItemProperty $App_Reg_Path -EA 0 } else { $Msg = "Not found registry key !" }; Write-Debug "DameWare Settings in registry $Reg_path : `n $Msg"; 
 
         # Задаем список локальных и доменных групп, члены которых рулят в DameWare (в т.ч. и AD группа полевых инженеров)
         # Многообразие групп доступа к Remote Control - https://social.technet.microsoft.com/Forums/ru-RU/8e32ab4c-bb03-4aff-a0e9-1c95da58881c/105210851086107510861086107310881072107910801077
