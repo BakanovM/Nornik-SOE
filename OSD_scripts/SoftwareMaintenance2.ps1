@@ -129,7 +129,7 @@ if ($Test_Net1.TcpTestSucceeded) { # есть ли прямое соединен
 Push-Location
 $Reg_param = "ETag_" + $Script_Name_no_ext # if ($Script_Name -match "(^.+)\..+") { $Reg_param = "ETag_" + $Matches[1] }
 $URI = "https://github.com/BakanovM/Nornik-SOE/raw/main/OSD_scripts/$Script_Name"
-"Requesting info about my script from Internet with URL: $URL" | Out-File $logFile -Append
+"Requesting info about my script from Internet with URI: $URI" | Out-File $logFile -Append
 try { $Web = IWR -Uri $URI -Method Head -UseBasicParsing } # Запрашиваем инфу о скрипте в инете - для того чтобы узнать обновился ли он
 catch { "Error when requesting info about my script from Internet ! $($_.Exception.Message)" | Out-File $logFile -Append; Finish-Script; Return }
 $Web_ETag = $Web.Headers.ETag.Trim('"')
