@@ -5,7 +5,9 @@
 На данный момент реализовано автоматическое обновление через интернет клиента VMware Horizon и установка DameWare MRC с нашего сервера.
 Для запуска скрипта в 32-битной среде 64-разрядной ОС Win10 (например Каспером) лучше использовать запуск через "C:\Windows\SysNative\WindowsPowerShell\v1.0\PowerShell.exe"
 
-Автор - Максим Баканов 2022-10-26
+Автор - Баканов Максим 2025-06-12
+2025-06-12 (45111 bytes) отключил установку ПО DameWare
+2022-10-26 (38000 bytes) - версия с установкой DameWare
 
 ToDo:
 + само-обновление скрипта нужно выполнять не после выполнения работ по обновлению ПО, а перед ними, т.е. в начале скрипта реализовать само-перезапуск, если в инете есть новая версия скрипта. Тогда можно быстро остановить массовые обновления косячной новой версии ПО.
@@ -276,6 +278,7 @@ echo $Msg; $Msg | Out-File $logFile -Append
 
 
 ####### Установка/обновление DameWare - начало #######
+if ($false) { # 2025-06-12 отключил установку ПО DameWare пор требованию Дружинина Алексея и Газукина Георгия, ранее с этой же просьбой обращался Дудик Игорь
 
 $App_Name = "DameWare Mini Remote Control Service";  # Название приложения, по которому будет производится поиск в реестре
 
@@ -373,6 +376,7 @@ if ($ExitCode -eq 0) { # Если была успешня инсталляция
 Get-Service DWMRCS | Restart-Service # DameWare Mini Remote Control
 }
 
+}
 ####### Установка/обновление DameWare - закончено #######
 
 
@@ -385,3 +389,98 @@ if ($Msg) { $Msg = "Detected Component Based Servicing pending operations - " + 
 
 $ProgressPreference = $Progr_Pref # восстанавливаем прогресс бар
 Finish-Script; Return
+
+
+# Цифровая подпись с использованием сертификата сохраненного для админ учетки в CertMgr.msc -> Current User -> Personal -> Certificates
+$Cert = Get-ChildItem cert:\CurrentUser\My –CodeSigningCert | Sort NotAfter | select -Last 1 # ? { $_.EnhancedKeyUsageList.FriendlyName -eq "Code Signing" } | 
+Set-AuthenticodeSignature -FilePath $ScriptName -Certificate $cert -HashAlgorithm SHA256 -TimestampServer "http://timestamp.sectigo.com"
+
+<# https://winitpro.ru/index.php/2016/11/17/kak-podpisat-skript-powershell-sertifikatom/
+У командлета Set-AuthenticodeSignature есть специальный параметр TimestampServer, в котором указывается URL адрес Timestamp службы. 
+Если этот параметр оставить пустым, то PS скрипт перестанет запускаться после истечения срока действия сертификата. Например -TimestampServer "http://timestamp.verisign.com/scripts/timstamp.dll" .
+https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/set-authenticodesignature
+#>
+
+
+# SIG # Begin signature block
+# MIIO6gYJKoZIhvcNAQcCoIIO2zCCDtcCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAy0SndvRYbiVr/
+# OObO++l0lqjhu2aCIoPK+LLeIvtcBKCCDCIwggV2MIIDXqADAgECAhM4AAAACtrJ
+# SITaigLjAAEAAAAKMA0GCSqGSIb3DQEBCwUAMBUxEzARBgNVBAMTCk5OLVJvb3Qt
+# Q0EwHhcNMTcwMTExMTIzOTQ5WhcNMzcwMTA5MTQxOTQ0WjBVMRIwEAYKCZImiZPy
+# LGQBGRYCcnUxFzAVBgoJkiaJk/IsZAEZFgdub3JuaWNrMRMwEQYKCZImiZPyLGQB
+# GRYDbnByMREwDwYDVQQDEwhOTi1IUS1DQTCCASIwDQYJKoZIhvcNAQEBBQADggEP
+# ADCCAQoCggEBANed1zSzoLSR0ikQhtk5brJs/3rOIBfRtTdjojH/9FpeJ2m9tgUB
+# 6hK1DHk6mSVmY9JrSXuEYZoA1r877O//M9bhwQ670f2csmBn0mM+PEgL7FP2sBRb
+# UC7/cGsWBmGe85D4yaG0PwIEQDCykhhXzJ3dt5Oo+rnTA+/BqrKggNcdjtPg8MYp
+# KHHKsKJGbJYUg6NWpIehCIA+Q4Q0FXPcLnAKyolR/DXb3O6+oQCEHTZagNSkuEpj
+# XfT+Ieh5IIhD/PD6aoJ8opf9CQb6XAmfPIYLT1Xppa8eOaX1dD6esifGK3DwHkAm
+# 15aFn8iAAvUfmkU0hMcSr+g61iAg27BPas0CAwEAAaOCAX0wggF5MBAGCSsGAQQB
+# gjcVAQQDAgECMCMGCSsGAQQBgjcVAgQWBBTm2dsEo4J+XB3vJ8ci9kFxo1LnNzAd
+# BgNVHQ4EFgQUEBNStjX2FBU4RXenePFnjq01OSAwPwYDVR0gBDgwNjA0BgRVHSAA
+# MCwwKgYIKwYBBQUHAgEWHmh0dHA6Ly9wa2kubm9ybmlrLnJ1L0NQUy5odG1sADAZ
+# BgkrBgEEAYI3FAIEDB4KAFMAdQBiAEMAQTALBgNVHQ8EBAMCAYYwDwYDVR0TAQH/
+# BAUwAwEB/zAfBgNVHSMEGDAWgBQTKBG+BwuyVH6OKxvFRabJFfYBQjA0BgNVHR8E
+# LTArMCmgJ6AlhiNodHRwOi8vcGtpLm5vcm5pay5ydS9OTi1Sb290LUNBLmNybDBQ
+# BggrBgEFBQcBAQREMEIwQAYIKwYBBQUHMAKGNGh0dHA6Ly9wa2kubm9ybmlrLnJ1
+# L1ZNU0hRUk9PVENBMDFfTk4tUm9vdC1DQSgxKS5jcnQwDQYJKoZIhvcNAQELBQAD
+# ggIBAFyTDI+IIRDHYfSH9LBihzjzDh/UlRU4q59Lg1kCQ/vVJhqHE+0uFQSeoFyy
+# lQPq/8apmIRj21TIwFDoYa0NyUnw5YNfvf8KUAplzy08SutuYkdCCf7RpptW2rCG
+# zWKfL9YeEjWhAJH3lL/zxb0ajtXCj4H0NgFmAIwpZMWIInGwr6QC6O39RuvhLSGR
+# TNi4bcJyJPm3Fjsi9X+B76mxSsZtJRPCDT9V1C7Wy8KNxojprWi80zCfbMz7pyS8
+# ZWrCKksyfICvCUWO+P/3B6dmEOwHl6ZIvJv5iYEp+Tk4aVRYpqNCH4cwHeXB081l
+# auQXAsv1OFbwNLXWnK2ytXanmggcvjI5Ql8FohOUy3rJweXlXmRGIUSz13nWur1J
+# FD/nMZTk+UNIZewRfmEq3S8Nv47vt2GfM0Hk+hOH6tmYoJrqrzWCbC23Oc29bFDA
+# 9HLyQaoXaZeXcC0Us3t1s1smQL6WOBnyL4qmWH2uUi93pZGl3aeyxGUcxX9YhdA+
+# 721cMgY6qbO8NytuQEJ2r82QuUaLHTvsyuhQtGOKUsL5cL9bjhvH09K+NUKHZMpw
+# Tv2U4otQJZH21dilsQL79FH4C9SW8ohJETec9NKkEkwy9fDI441opO+WXjWNPeJz
+# tbtNj4Ko2KcTikVng4ItlcaIkl7/huaOUc+wX9mH8N299lOOMIIGpDCCBYygAwIB
+# AgITRgAM2U0Fl30xbzJNtwACAAzZTTANBgkqhkiG9w0BAQsFADBVMRIwEAYKCZIm
+# iZPyLGQBGRYCcnUxFzAVBgoJkiaJk/IsZAEZFgdub3JuaWNrMRMwEQYKCZImiZPy
+# LGQBGRYDbnByMREwDwYDVQQDEwhOTi1IUS1DQTAeFw0yNTA2MTIwMDExMjlaFw0y
+# NzA2MTIwMDExMjlaMIGXMRIwEAYKCZImiZPyLGQBGRYCcnUxFzAVBgoJkiaJk/Is
+# ZAEZFgdub3JuaWNrMRMwEQYKCZImiZPyLGQBGRYDbnByMQwwCgYDVQQLEwNTU0Mx
+# DDAKBgNVBAsTA1NBUjEPMA0GA1UECxMGQWRtaW5zMSYwJAYDVQQDDB3QkdCw0LrQ
+# sNC90L7QsiDQnC7QoS4gLSBhZG1pbjCCASIwDQYJKoZIhvcNAQEBBQADggEPADCC
+# AQoCggEBAMJ9KiWaz9EXElr93nqqjf0/msT13eY9ghbYZiZlSDgip3CFl0ZPBuwl
+# STcEe+mcUPkHrjOu592NoYnJtQvc52E6MhC/QmXWoqTwjjZhbho5SXOuH9ddvbyR
+# 4DL5J+n8MKPm8GNy9SoMPEozKPkdRCgQtuRjbRRWxaJPrFg81GgfyDNQECAfw6e8
+# DSOlj6gjz0Zwpu3zlh/y9iHu9MUUQcZJIsBj0XMo1TwT4JSKYBEcQwHN0pW6yzsr
+# LoNqLQ9lOXOvrC693TnmqhAKRjUbv3Ng6Kb6mr/tSFQqSJ1COuFdn6SlJRY4gs/b
+# WRl5OURMbBysZ2FeS0aTisJJRjhb9xUCAwEAAaOCAygwggMkMDwGCSsGAQQBgjcV
+# BwQvMC0GJSsGAQQBgjcVCIPy8jiB7MpigcWLOoaP3xODra8zRoXG83O9xDYCAWQC
+# AQowEwYDVR0lBAwwCgYIKwYBBQUHAwMwCwYDVR0PBAQDAgeAMBsGCSsGAQQBgjcV
+# CgQOMAwwCgYIKwYBBQUHAwMwHQYDVR0OBBYEFEanCyHnCAE63V4QY6t2UzB77Yk2
+# MB8GA1UdIwQYMBaAFBATUrY19hQVOEV3p3jxZ46tNTkgMIHwBgNVHR8EgegwgeUw
+# geKggd+ggdyGgbZsZGFwOi8vL0NOPU5OLUhRLUNBLENOPU5OUEtJLENOPUNEUCxD
+# Tj1QdWJsaWMlMjBLZXklMjBTZXJ2aWNlcyxDTj1TZXJ2aWNlcyxDTj1Db25maWd1
+# cmF0aW9uLERDPWFkcm9vdCxEQz1ub3JuaWNrLERDPXJ1P2NlcnRpZmljYXRlUmV2
+# b2NhdGlvbkxpc3Q/YmFzZT9vYmplY3RDbGFzcz1jUkxEaXN0cmlidXRpb25Qb2lu
+# dIYhaHR0cDovL3BraS5ub3JuaWsucnUvTk4tSFEtQ0EuY3JsMIIBHgYIKwYBBQUH
+# AQEEggEQMIIBDDCBsAYIKwYBBQUHMAKGgaNsZGFwOi8vL0NOPU5OLUhRLUNBLENO
+# PUFJQSxDTj1QdWJsaWMlMjBLZXklMjBTZXJ2aWNlcyxDTj1TZXJ2aWNlcyxDTj1D
+# b25maWd1cmF0aW9uLERDPWFkcm9vdCxEQz1ub3JuaWNrLERDPXJ1P2NBQ2VydGlm
+# aWNhdGU/YmFzZT9vYmplY3RDbGFzcz1jZXJ0aWZpY2F0aW9uQXV0aG9yaXR5MDAG
+# CCsGAQUFBzAChiRodHRwOi8vcGtpLm5vcm5pay5ydS9OTi1IUS1DQSgyKS5jcnQw
+# JQYIKwYBBQUHMAGGGWh0dHA6Ly9wa2kubm9ybmlrLnJ1L29jc3AwUAYJKwYBBAGC
+# NxkCBEMwQaA/BgorBgEEAYI3GQIBoDEEL1MtMS01LTIxLTE0Mjc0OTMyODctMjg5
+# MjA3NDEzNC0yODMzODAzMTgtMTU2MDMyMA0GCSqGSIb3DQEBCwUAA4IBAQAdK4QQ
+# tEqv8DDrd+bPxWcDo6AtKF1rOi5sw6UDWBJRc5pWGK9+0n6XDcKsBYSSd9m8MOCP
+# k+3V5LkeyT1M5FCWDEXJE5nWJumOKPEY0a2dSAqXeLSS8RRqp8sTHU0rtPxSc3aX
+# hWkHAbMqD1q8sorMgCRgJK7GKS2Sd4yZApWh/K8B5H3EKV1rTbr3kBTInee760yg
+# N0MG9vUI0vQMQ0LfflM6F3SaFMTQQ/pXCIR2ni5IgoeKHFKSRL+uNS2NaBusKrs1
+# b840gwUUtpC68uvDfPbJogXMzz/iCrFf1oFRNg0XnQHIHZrX8HGUjsjEUhV/rxIg
+# dzRvpD0Yzbb9gThVMYICHjCCAhoCAQEwbDBVMRIwEAYKCZImiZPyLGQBGRYCcnUx
+# FzAVBgoJkiaJk/IsZAEZFgdub3JuaWNrMRMwEQYKCZImiZPyLGQBGRYDbnByMREw
+# DwYDVQQDEwhOTi1IUS1DQQITRgAM2U0Fl30xbzJNtwACAAzZTTANBglghkgBZQME
+# AgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEM
+# BgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqG
+# SIb3DQEJBDEiBCDzKXHwhbSljhCjeVotSdNDA0ZnYaw2WsqpNwq3XhQF9jANBgkq
+# hkiG9w0BAQEFAASCAQAINafnl+b2vA9PiSkndjb/mmqIxlpTnFMSuM0At0LUzpNp
+# RlULcGGvmvANSNhE/NiBykYWA46vv2QplxRMB51n/91X43Gm4uGrb+FXiog/yJ0q
+# bbu4sv70dB+LVXD8htFGQEkvagRNOysL0q3bXx6HM6GucV91692LeOI5PUkyW6T6
+# RTtCsBh8qB0L7hrJa0u3yYcgpqvb8zw1/6jpdnSyBC56K+ZK66kvvLyJCTNiNkOG
+# kHQTTMblvk+vz3PGVYIpZ46+18Kg7iZahBQQPW2zFPWDagh3Lg6u00cV+wPFZs3l
+# esOX778Xcxl03HghUe+Vr6i5zoFaQehSttwoBtKQ
+# SIG # End signature block
